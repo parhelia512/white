@@ -404,7 +404,10 @@ func store_named_type(ref c: Compiler, info: NamedTypeInfo) -> Void {
 
 // compiler init & state utils
 func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, arena: AstArena) -> Compiler? {
-    let f: file.File = file.create(out_path)?;
+    let f: file.File = null;
+    if (out_path is !null && out_path.length() != 0) {
+        f = file.create(out_path)?;
+    }
     // initialize empty scope
     let root_scope: Scope = Scope(table=Dict(), parent=-1, gc_vars=[], depth=0);
 
