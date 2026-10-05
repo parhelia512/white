@@ -252,6 +252,25 @@ func check_copy_propagation() -> Bool {
     return program.arena.instructions[0].operands[0] == program.arena.functions[0].parameters[0];
 }
 
+func check_absorbing_identities() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_unsigned_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "absorbing", [WirParam(name="value", type_id=i32)], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let value = program.arena.functions[wir_id_index(UInt32(function))].parameters[0];
+    let zero = wir_const_int(ref program, i32, UInt128(0U));
+    let all_bits = wir_const_int(ref program, i32, UInt128(4294967295U));
+    let location = no_wir_location();
+    let multiplied = wir_append(ref program, entry, WirOpcode.Multiply, i32, [value, zero], [], location);
+    let masked = wir_append(ref program, entry, WirOpcode.BitAnd, i32, [multiplied, value], [], location);
+    let filled = wir_append(ref program, entry, WirOpcode.BitOr, i32, [masked, all_bits], [], location);
+    let repeated = wir_append(ref program, entry, WirOpcode.BitAnd, i32, [filled, filled], [], location);
+    wir_return(ref program, entry, repeated, location);
+    let stats = optimize_wir(ref program, "-O1");
+    if (stats.copies != 4 || verify_wir(program).length() != 0 || program.arena.instructions.length() != 1) { return false; }
+    return program.arena.instructions[0].operands[0] == all_bits;
+}
+
 func check_repeated_checks() -> Bool {
     let program = new_wir_module("x86_64-pc-windows-msvc", 64);
     let i32 = wir_signed_int_type(ref program, 32);
@@ -327,6 +346,52 @@ func check_constant(op: WirOpcode, bits: Int, signed: Bool, lhs: UInt128, rhs: U
     return program.arena.values[wir_id_index(UInt32(returned))].integer == expected;
 }
 
+func check_unary_constant(op: WirOpcode, bits: Int, value: UInt128, expected: UInt128) -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let type = wir_signed_int_type(ref program, bits);
+    let function = wir_add_function(ref program, "unary.constant", [], type, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let operand = wir_const_int(ref program, type, value);
+    let result = wir_append(ref program, entry, op, type, [operand], [], no_wir_location());
+    wir_return(ref program, entry, result, no_wir_location());
+    if (verify_wir(program).length() != 0) { return false; }
+    let stats = optimize_wir(ref program, "-O1");
+    if (stats.constants != 1 || verify_wir(program).length() != 0) { return false; }
+    let returned = program.arena.instructions[0].operands[0];
+    return program.arena.values[wir_id_index(UInt32(returned))].integer == expected;
+}
+
+func check_cast_constant(op: WirOpcode, source_bits: Int, target_bits: Int, signed: Bool, value: UInt128, expected: UInt128) -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let source = wir_unsigned_int_type(ref program, source_bits);
+    if (signed) { source = wir_signed_int_type(ref program, source_bits); }
+    let target = wir_unsigned_int_type(ref program, target_bits);
+    if (signed) { target = wir_signed_int_type(ref program, target_bits); }
+    let function = wir_add_function(ref program, "cast.constant", [], target, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let operand = wir_const_int(ref program, source, value);
+    let result = wir_append(ref program, entry, op, target, [operand], [], no_wir_location());
+    wir_return(ref program, entry, result, no_wir_location());
+    if (verify_wir(program).length() != 0) { return false; }
+    let stats = optimize_wir(ref program, "-O1");
+    if (stats.constants != 1 || verify_wir(program).length() != 0) { return false; }
+    let returned = program.arena.instructions[0].operands[0];
+    return program.arena.values[wir_id_index(UInt32(returned))].integer == expected;
+}
+
+func check_invalid_shift() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let type = wir_unsigned_int_type(ref program, 8);
+    let function = wir_add_function(ref program, "invalid.shift", [], type, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let one = wir_const_int(ref program, type, UInt128(1U));
+    let width = wir_const_int(ref program, type, UInt128(8U));
+    let result = wir_append(ref program, entry, WirOpcode.ShiftLeft, type, [one, width], [], no_wir_location());
+    wir_return(ref program, entry, result, no_wir_location());
+    let stats = optimize_wir(ref program, "-O1");
+    return stats.constants == 0 && program.arena.instructions[0].opcode == WirOpcode.ShiftLeft && verify_wir(program).length() == 0;
+}
+
 func main() -> Int {
     if (!check_cleanup()) { print("FAIL: WIR cleanup or value remapping"); return 1; }
     if (!check_effects()) { print("FAIL: WIR optimization removed observable effects"); return 1; }
@@ -337,14 +402,27 @@ func main() -> Int {
     if (!check_stack_boundaries()) { print("FAIL: WIR forwarding crossed a memory or block boundary"); return 1; }
     if (!check_block_parameters()) { print("FAIL: WIR block parameter elimination"); return 1; }
     if (!check_copy_propagation()) { print("FAIL: WIR copy propagation"); return 1; }
+    if (!check_absorbing_identities()) { print("FAIL: WIR absorbing integer identities"); return 1; }
     if (!check_repeated_checks()) { print("FAIL: WIR repeated safety checks"); return 1; }
     if (!check_jump_threading()) { print("FAIL: WIR trivial jump threading"); return 1; }
     if (!check_constant(WirOpcode.Add, 8, false, UInt128(255U), UInt128(1U), UInt128(0U), false) ||
         !check_constant(WirOpcode.Subtract, 32, true, UInt128(0U), UInt128(1U), UInt128(4294967295U), false) ||
         !check_constant(WirOpcode.Multiply, 64, false, UInt128(18446744073709551615UL), UInt128(2U), UInt128(18446744073709551614UL), false) ||
+        !check_constant(WirOpcode.ShiftLeft, 8, false, UInt128(129U), UInt128(1U), UInt128(2U), false) ||
+        !check_constant(WirOpcode.SignedShiftRight, 8, true, UInt128(128U), UInt128(1U), UInt128(192U), false) ||
+        !check_constant(WirOpcode.UnsignedShiftRight, 8, false, UInt128(128U), UInt128(1U), UInt128(64U), false) ||
         !check_constant(WirOpcode.SignedLess, 128, true, UInt128(1U) << 127, UInt128(1U), UInt128(1U), true) ||
         !check_constant(WirOpcode.UnsignedLess, 128, false, UInt128(1U) << 127, UInt128(1U), UInt128(0U), true)) {
         print("FAIL: WIR constant folding changed integer width or signedness");
+        return 1;
+    }
+    if (!check_unary_constant(WirOpcode.Negate, 8, UInt128(1U), UInt128(255U)) ||
+        !check_unary_constant(WirOpcode.Negate, 128, UInt128(0U), UInt128(0U)) ||
+        !check_cast_constant(WirOpcode.Truncate, 64, 8, false, UInt128(4886718345UL), UInt128(137U)) ||
+        !check_cast_constant(WirOpcode.SignExtend, 8, 64, true, UInt128(128U), UInt128(18446744073709551488UL)) ||
+        !check_cast_constant(WirOpcode.ZeroExtend, 8, 64, false, UInt128(255U), UInt128(255U)) ||
+        !check_invalid_shift()) {
+        print("FAIL: WIR unary, shift, or cast constant folding");
         return 1;
     }
     print("PASS: WIR optimization");

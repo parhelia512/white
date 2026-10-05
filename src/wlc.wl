@@ -29,6 +29,7 @@ struct CompilerConfig(
     is_compile_only : Bool,  // -c
     is_asm_only     : Bool,  // -S
     is_emit_llvm    : Bool,  // --emit-llvm
+    is_emit_wir     : Bool,  // --emit-wir
     debug_info      : Bool,  // -g
     opt_level       : String,
     verbose         : Bool,
@@ -54,6 +55,7 @@ func print_usage() -> Void {
     print("  -c                     Compile and assemble, but do not link");
     print("  -S                     Compile only; do not assemble or link");
     print("  --emit-llvm            Use the LLVM representation for assembler and object files");
+    print("  --emit-wir             Write optimized WIR and stop before target lowering");
     print("  -O<level>              Optimization level (0, 1, 2, 3, s, z). Default: 2");
     print("  -g                     Generate source-level debug information");
     print("  -L <dir>               Add <dir> to the linker library search path");
@@ -213,6 +215,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         is_compile_only = false,
         is_asm_only     = false,
         is_emit_llvm    = false,
+        is_emit_wir     = false,
         debug_info      = false,
         opt_level       = "-O2",
         verbose         = false,
@@ -238,6 +241,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         else if (arg == "-S") { cfg.is_asm_only = true; }
         else if (arg == "--shared") { cfg.is_shared = true; }
         else if (arg == "--emit-llvm") { cfg.is_emit_llvm = true; }
+        else if (arg == "--emit-wir") { cfg.is_emit_wir = true; }
         else if (arg == "--backend") {
             i++;
             if (i >= argc) { print("Error: --backend requires an argument"); return 1; }
@@ -316,6 +320,10 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm', 'wir', or 'machine'.");
         return 1;
     }
+    if (cfg.is_emit_wir && (cfg.is_emit_llvm || cfg.is_asm_only || cfg.is_compile_only || cfg.is_shared || cfg.dump_ir)) {
+        print("Error: --emit-wir cannot be combined with -S, -c, --shared, --emit-llvm, or --dump-ir.");
+        return 1;
+    }
     if (!WhitelangTarget.select_target(cfg.target_triple)) {
         print("Error: Unsupported target '" + cfg.target_triple + "'.");
         print("Run 'wlc --target-help' to list supported targets.");
@@ -367,12 +375,15 @@ func main(argc: Int, ptr argv: String) -> Int {
         ll_file = temp_dir + "wlc_tmp_" + file_only + "_" + process.id() + ".ll";
     }
 
-    if (cfg.backend != "machine" && !cfg.keep_temps && !cfg.is_emit_llvm) {
+    if (cfg.backend != "machine" && !cfg.is_emit_wir && !cfg.keep_temps && !cfg.is_emit_llvm) {
         WhitelangExceptions.CLEAN_TMP_LL = ll_file;
     }
 
     if (cfg.output_file.length() == 0) {
-        if (cfg.is_asm_only) {
+        if (cfg.is_emit_wir) {
+            cfg.output_file = base_name + ".wir";
+        }
+        else if (cfg.is_asm_only) {
             if (cfg.is_emit_llvm) { cfg.output_file = base_name + ".ll"; }
             else { cfg.output_file = base_name + ".s"; }
         }
@@ -399,7 +410,7 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
 
     let machine_file: String = "";
-    if (cfg.backend == "machine") {
+    if (cfg.backend == "machine" && !cfg.is_emit_wir) {
         if (cfg.is_compile_only) { machine_file = cfg.output_file; }
         else if (cfg.keep_temps) { machine_file = base_name + ".obj"; }
         else { machine_file = ll_file.slice(0, ll_file.length() - 3) + ".obj"; }
@@ -430,10 +441,10 @@ func main(argc: Int, ptr argv: String) -> Int {
     if (cfg.dump_ast) { print("[Debug] AST Dumped"); }
 
     let compiler_output: String = ll_file;
-    if (cfg.backend == "machine") { compiler_output = ""; }
+    if (cfg.backend == "machine" || cfg.is_emit_wir) { compiler_output = ""; }
     let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(compiler_output, cfg.is_shared, cfg.debug_info, arena)?;
     catch(err) {
-        if (cfg.backend == "machine") {
+        if (cfg.backend == "machine" || cfg.is_emit_wir) {
             print("Error: Could not initialize the compiler (error " + Int(err) + ")");
         } else {
             print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
@@ -442,7 +453,39 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
     WhitelangExceptions.ACTIVE_FILE = compiler.output_file;
-    if (cfg.backend == "wir") {
+    if (cfg.is_emit_wir) {
+        WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
+        WhitelangExceptions.check_errors_and_abort();
+
+        let result: WhitelangWIR.WirPipelineResult = WhitelangWIR.lower_program_to_wir_text(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits(), cfg.opt_level)?;
+        catch(err) {
+            print("Build Failed: Could not produce WIR output.");
+            return 1;
+        }
+        if (result.errors.length() != 0) {
+            let error_index: Int = 0;
+            while (error_index < result.errors.length()) {
+                print("InternalCompilerError: " + result.errors[error_index]);
+                error_index++;
+            }
+            return 1;
+        }
+
+        let wir_file: file.File = file.create(cfg.output_file)?;
+        catch(err) {
+            print("Build Failed: Could not create WIR file " + cfg.output_file + ".");
+            return 1;
+        }
+        wir_file.write(result.text);
+        if (wir_file.last_error() != file.Error.None) {
+            wir_file.close();
+            print("Build Failed: Could not write WIR file " + cfg.output_file + ".");
+            return 1;
+        }
+        wir_file.close();
+        print("Generated: " + cfg.output_file);
+        return 0;
+    } else if (cfg.backend == "wir") {
         WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
 

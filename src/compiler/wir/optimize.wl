@@ -329,6 +329,21 @@ func wir_copy_source(ref program: WirModule, ref instruction: WirInstruction, re
     if (op == WirOpcode.Multiply && wir_integer_is(ref program, left, UInt128(1U))) {
         return right;
     }
+    if ((op == WirOpcode.Multiply || op == WirOpcode.BitAnd) && wir_integer_is(ref program, right, UInt128(0U))) {
+        return right;
+    }
+    if ((op == WirOpcode.Multiply || op == WirOpcode.BitAnd) && wir_integer_is(ref program, left, UInt128(0U))) {
+        return left;
+    }
+    if (op == WirOpcode.BitOr && wir_integer_is(ref program, right, wir_integer_mask(ref program, instruction.type_id))) {
+        return right;
+    }
+    if (op == WirOpcode.BitOr && wir_integer_is(ref program, left, wir_integer_mask(ref program, instruction.type_id))) {
+        return left;
+    }
+    if ((op == WirOpcode.BitAnd || op == WirOpcode.BitOr) && left == right) {
+        return left;
+    }
     if ((op == WirOpcode.ShiftLeft || op == WirOpcode.SignedShiftRight || op == WirOpcode.UnsignedShiftRight) &&
         wir_integer_is(ref program, right, UInt128(0U))) {
         return left;
@@ -390,6 +405,7 @@ func wir_integer_expression(ref program: WirModule, ref instruction: WirInstruct
     if (op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
         op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor &&
         op != WirOpcode.Not && op != WirOpcode.Negate &&
+        op != WirOpcode.ShiftLeft && op != WirOpcode.SignedShiftRight && op != WirOpcode.UnsignedShiftRight &&
         op != WirOpcode.Equal && op != WirOpcode.NotEqual &&
         op != WirOpcode.SignedLess && op != WirOpcode.SignedLessEqual &&
         op != WirOpcode.SignedGreater && op != WirOpcode.SignedGreaterEqual &&
@@ -640,8 +656,10 @@ func wir_thread_trivial_jumps(ref program: WirModule, ref stats: WirOptimization
 func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) -> Bool {
     if (instruction.result == NO_WIR_VALUE || instruction.operands.length() == 0 || instruction.operands.length() > 2) { return false; }
     let op = instruction.opcode;
-    if (op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor && op != WirOpcode.Not &&
+    if (op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor && op != WirOpcode.Not && op != WirOpcode.Negate &&
         op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
+        op != WirOpcode.ShiftLeft && op != WirOpcode.SignedShiftRight && op != WirOpcode.UnsignedShiftRight &&
+        op != WirOpcode.Truncate && op != WirOpcode.SignExtend && op != WirOpcode.ZeroExtend &&
         op != WirOpcode.Equal && op != WirOpcode.NotEqual &&
         op != WirOpcode.SignedLess && op != WirOpcode.SignedLessEqual && op != WirOpcode.SignedGreater && op != WirOpcode.SignedGreaterEqual &&
         op != WirOpcode.UnsignedLess && op != WirOpcode.UnsignedLessEqual && op != WirOpcode.UnsignedGreater && op != WirOpcode.UnsignedGreaterEqual) { return false; }
@@ -662,10 +680,40 @@ func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) ->
     }
 
     let result: UInt128 = UInt128(0U);
-    if (op == WirOpcode.BitAnd) { result = lhs & rhs; }
+    if (op == WirOpcode.Truncate || op == WirOpcode.SignExtend || op == WirOpcode.ZeroExtend) {
+        let target = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let target_width = target.bits;
+        if (target.kind == WirTypeKind.BoolType) { target_width = 1; }
+        if (target_width <= 0 || target_width > 128) { return false; }
+        let target_mask: UInt128 = ~UInt128(0U);
+        if (target_width < 128) { target_mask = (UInt128(1U) << UInt128(target_width)) - UInt128(1U); }
+        result = lhs & target_mask;
+        if (op == WirOpcode.SignExtend) {
+            let sign = UInt128(1U) << UInt128(width - 1);
+            if ((lhs & sign) != UInt128(0U)) { result = lhs | (target_mask ^ mask); }
+        }
+    }
+    else if (op == WirOpcode.BitAnd) { result = lhs & rhs; }
     else if (op == WirOpcode.BitOr) { result = lhs | rhs; }
     else if (op == WirOpcode.BitXor) { result = lhs ^ rhs; }
     else if (op == WirOpcode.Not) { result = ~lhs & mask; }
+    else if (op == WirOpcode.Negate) {
+        if (lhs != UInt128(0U)) { result = mask - lhs + UInt128(1U); }
+    }
+    else if (op == WirOpcode.ShiftLeft || op == WirOpcode.SignedShiftRight || op == WirOpcode.UnsignedShiftRight) {
+        if (rhs >= UInt128(width)) { return false; }
+        if (op == WirOpcode.ShiftLeft) { result = (lhs << rhs) & mask; }
+        else {
+            result = lhs >> rhs;
+            if (op == WirOpcode.SignedShiftRight && rhs != UInt128(0U)) {
+                let sign = UInt128(1U) << UInt128(width - 1);
+                if ((lhs & sign) != UInt128(0U)) {
+                    let kept = (UInt128(1U) << UInt128(width - Int(rhs))) - UInt128(1U);
+                    result = result | (mask ^ kept);
+                }
+            }
+        }
+    }
     else if (op == WirOpcode.Add || op == WirOpcode.Subtract || op == WirOpcode.Multiply) {
         // evaluate narrow arithmetic in 128 bits, then apply the WIR bit width
         if (width > 64) { return false; }
