@@ -548,6 +548,13 @@ func x86_set_condition_register(ref output: X86CodeBuffer, destination: X86Regis
     return true;
 }
 
+func x86_cmov_sign(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, wide: Bool) -> Void {
+    x86_rex(ref output, wide, destination, X86Register.None, source);
+    x86_emit_byte(ref output, Byte(15));
+    x86_emit_byte(ref output, Byte(72));
+    x86_emit_byte(ref output, x86_modrm_register(destination, source));
+}
+
 func x86_jump_rel32(ref output: X86CodeBuffer) -> Int {
     x86_emit_byte(ref output, Byte(233));
     let patch_offset: Int = output.bytes.length();

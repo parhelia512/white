@@ -216,6 +216,7 @@ func wir_binary_name(opcode: WirOpcode) -> String {
 }
 
 func wir_unary_name(opcode: WirOpcode) -> String {
+    if (opcode == WirOpcode.Abs) { return "abs"; }
     if (opcode == WirOpcode.Negate) { return "neg"; }
     if (opcode == WirOpcode.FloatNegate) { return "fneg"; }
     if (opcode == WirOpcode.Not) { return "not"; }

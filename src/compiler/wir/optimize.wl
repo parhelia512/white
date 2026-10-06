@@ -3,7 +3,7 @@
 import * from "model.wl"
 
 
-struct WirOptimizationStats(instructions: Int, blocks: Int, branches: Int, jumps: Int, constants: Int, copies: Int, checks: Int, loads: Int, stores: Int, slots: Int, parameters: Int, expressions: Int)
+struct WirOptimizationStats(instructions: Int, blocks: Int, branches: Int, jumps: Int, constants: Int, copies: Int, checks: Int, loads: Int, stores: Int, slots: Int, parameters: Int, expressions: Int, idioms: Int)
 
 struct WirOptimizationPlan(forwarding_distance: Int, extra_scans: Int, code_growth_percent: Int, inline_size: Int)
 
@@ -73,6 +73,20 @@ func wir_stable_block_argument(ref program: WirModule, value: WirValueID) -> Boo
            kind == WirValueKind.Global || kind == WirValueKind.Function;
 }
 
+func wir_value_before(ref program: WirModule, value_id: WirValueID, block_id: WirBlockID, position: Int) -> Bool {
+    if (wir_stable_block_argument(ref program, value_id)) { return true; }
+    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (value.kind != WirValueKind.Instruction) { return false; }
+
+    let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+    let i: Int = 0;
+    while (i < position) {
+        if (UInt32(block.instructions[i]) == value.owner) { return true; }
+        i++;
+    }
+    return false;
+}
+
 func wir_prepare_block_parameters(ref program: WirModule, ref offsets: Vector(Int), ref candidates: Vector(WirValueID), ref states: Vector(Int)) -> Void {
     let i = 0;
     while (i < program.arena.blocks.length()) {
@@ -136,6 +150,13 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
     let first_block: Vector(WirBlockID) = [];
     let multiple_blocks: Vector(Bool) = [];
     let unresolved_load: Vector(Bool) = [];
+    let allocation_block: Vector(WirBlockID) = [];
+    let store_block: Vector(WirBlockID) = [];
+    let store_position: Vector(Int) = [];
+    let store_count: Vector(Int) = [];
+    let stored_value: Vector(WirValueID) = [];
+    let first_entry_load: Vector(Int) = [];
+    let promote: Vector(Bool) = [];
     let aliases: Vector(WirValueID) = [];
     let stores: Vector(WirInstID) = [];
     let store_slots: Vector(Int) = [];
@@ -156,6 +177,13 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
             first_block.append(NO_WIR_BLOCK);
             multiple_blocks.append(false);
             unresolved_load.append(false);
+            allocation_block.append(NO_WIR_BLOCK);
+            store_block.append(NO_WIR_BLOCK);
+            store_position.append(-1);
+            store_count.append(0);
+            stored_value.append(NO_WIR_VALUE);
+            first_entry_load.append(-1);
+            promote.append(false);
         }
         i++;
     }
@@ -170,6 +198,10 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
         let j = 0;
         while (j < block.instructions.length()) {
             let ptr instruction: WirInstruction = ref program.arena.instructions[wir_id_index(UInt32(block.instructions[j]))];
+            if (instruction.opcode == WirOpcode.StackAlloc && instruction.result != NO_WIR_VALUE) {
+                let allocated_slot: Int = slot_of_value[wir_id_index(UInt32(instruction.result))];
+                if (allocated_slot >= 0) { allocation_block[allocated_slot] = block_id; }
+            }
             let k = 0;
             while (k < instruction.operands.length()) {
                 let value_index: Int = wir_id_index(UInt32(instruction.operands[k]));
@@ -184,6 +216,14 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
                         first_block[slot] = block_id;
                     } else if (first_block[slot] != block_id) {
                         multiple_blocks[slot] = true;
+                    }
+                    if (instruction.opcode == WirOpcode.Store && k == 1) {
+                        store_count[slot] = store_count[slot] + 1;
+                        store_block[slot] = block_id;
+                        store_position[slot] = j;
+                        stored_value[slot] = instruction.operands[0];
+                    } else if (instruction.opcode == WirOpcode.Load && k == 0 && block_id == allocation_block[slot] && first_entry_load[slot] < 0) {
+                        first_entry_load[slot] = j;
                     }
                 }
                 k++;
@@ -200,6 +240,19 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
                 k++;
             }
             j++;
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < slots.length()) {
+        let block_id: WirBlockID = allocation_block[i];
+        if (safe[i] && store_count[i] == 1 && block_id != NO_WIR_BLOCK && store_block[i] == block_id &&
+            (first_entry_load[i] < 0 || first_entry_load[i] > store_position[i]) &&
+            wir_value_before(ref program, stored_value[i], block_id, store_position[i])) {
+            let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+            let function: WirFunction = program.arena.functions[wir_id_index(UInt32(block.function))];
+            promote[i] = function.entry == block_id;
         }
         i++;
     }
@@ -236,7 +289,11 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
             } else if (instruction.opcode == WirOpcode.Load && instruction.operands.length() == 1) {
                 active_slot = slot_of_value[wir_id_index(UInt32(instruction.operands[0]))];
                 if (active_slot >= 0 && safe[active_slot]) {
-                    if (generation[active_slot] == block_generation &&
+                    if (promote[active_slot]) {
+                        aliases[wir_id_index(UInt32(instruction.result))] = stored_value[active_slot];
+                        removed[index] = true;
+                        stats.loads++;
+                    } else if (generation[active_slot] == block_generation &&
                         (max_distance < 0 || j - stored_at[active_slot] <= max_distance)) {
                         aliases[wir_id_index(UInt32(instruction.result))] = current[active_slot];
                         removed[index] = true;
@@ -262,7 +319,7 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
     // in another block stays in memory, this pass does not build memory SSA.
     i = 0;
     while (i < slots.length()) {
-        if (safe[i] && !multiple_blocks[i] && !unresolved_load[i]) {
+        if (safe[i] && ((!multiple_blocks[i] && !unresolved_load[i]) || promote[i])) {
             let value = program.arena.values[wir_id_index(UInt32(slots[i]))];
             removed[wir_id_index(value.owner)] = true;
             stats.slots++;
@@ -272,7 +329,7 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
     i = 0;
     while (i < stores.length()) {
         let slot: Int = store_slots[i];
-        if (safe[slot] && !multiple_blocks[slot] && !unresolved_load[slot]) {
+        if (safe[slot] && ((!multiple_blocks[slot] && !unresolved_load[slot]) || promote[slot])) {
             removed[wir_id_index(UInt32(stores[i]))] = true;
             stats.stores++;
         }
@@ -404,7 +461,7 @@ func wir_integer_expression(ref program: WirModule, ref instruction: WirInstruct
     // Leave loads, trapping operations and IEEE floating-point operations alone.
     if (op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
         op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor &&
-        op != WirOpcode.Not && op != WirOpcode.Negate &&
+        op != WirOpcode.Not && op != WirOpcode.Abs && op != WirOpcode.Negate &&
         op != WirOpcode.ShiftLeft && op != WirOpcode.SignedShiftRight && op != WirOpcode.UnsignedShiftRight &&
         op != WirOpcode.Equal && op != WirOpcode.NotEqual &&
         op != WirOpcode.SignedLess && op != WirOpcode.SignedLessEqual &&
@@ -653,10 +710,192 @@ func wir_thread_trivial_jumps(ref program: WirModule, ref stats: WirOptimization
     }
 }
 
+func wir_defining_instruction(ref program: WirModule, value_id: WirValueID) -> WirInstID {
+    if (value_id == NO_WIR_VALUE) { return NO_WIR_INST; }
+    let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+    if (value.kind != WirValueKind.Instruction) { return NO_WIR_INST; }
+    return WirInstID(value.owner);
+}
+
+func wir_abs_shift(ref program: WirModule, value_id: WirValueID, source_id: WirValueID, width: Int, ref removed: Vector(Bool), ref aliases: Vector(WirValueID)) -> Bool {
+    let instruction_id: WirInstID = wir_defining_instruction(ref program, value_id);
+    if (instruction_id == NO_WIR_INST) { return false; }
+    let index: Int = wir_id_index(UInt32(instruction_id));
+    if (removed[index]) { return false; }
+
+    let instruction: WirInstruction = program.arena.instructions[index];
+    return instruction.opcode == WirOpcode.SignedShiftRight && instruction.operands.length() == 2 &&
+           wir_resolve_alias(instruction.operands[0], ref aliases) == source_id &&
+           wir_integer_is(ref program, wir_resolve_alias(instruction.operands[1], ref aliases), UInt128(width - 1));
+}
+
+func wir_abs_add(ref program: WirModule, value_id: WirValueID, source_id: WirValueID, mask_id: WirValueID, ref removed: Vector(Bool), ref aliases: Vector(WirValueID)) -> Bool {
+    let instruction_id: WirInstID = wir_defining_instruction(ref program, value_id);
+    if (instruction_id == NO_WIR_INST) { return false; }
+    let index: Int = wir_id_index(UInt32(instruction_id));
+    if (removed[index]) { return false; }
+
+    let instruction: WirInstruction = program.arena.instructions[index];
+    if (instruction.opcode != WirOpcode.Add || instruction.operands.length() != 2) { return false; }
+    let left: WirValueID = wir_resolve_alias(instruction.operands[0], ref aliases);
+    let right: WirValueID = wir_resolve_alias(instruction.operands[1], ref aliases);
+    return (left == source_id && right == mask_id) || (left == mask_id && right == source_id);
+}
+
+func wir_recognize_abs(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
+    // This is the branchless two's-complement form of abs:
+    //
+    //     mask = x >> (bits - 1)
+    //     (x + mask) ^ mask
+    //
+    // Keep the match structural. Similar-looking expressions with a different
+    // shift count or a second mask value must retain their original meaning.
+    let i: Int = 0;
+    while (i < program.arena.instructions.length()) {
+        if (!removed[i]) {
+            let ptr instruction: WirInstruction = ref program.arena.instructions[i];
+            if (instruction.opcode == WirOpcode.BitXor && instruction.operands.length() == 2 && instruction.result != NO_WIR_VALUE) {
+                let type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+                if (type.kind == WirTypeKind.SignedInt && type.bits > 1 && type.bits <= 64) {
+                    let left: WirValueID = wir_resolve_alias(instruction.operands[0], ref aliases);
+                    let right: WirValueID = wir_resolve_alias(instruction.operands[1], ref aliases);
+                    let add_id: WirValueID = left;
+                    let mask_id: WirValueID = right;
+                    let add_instruction: WirInstID = wir_defining_instruction(ref program, add_id);
+
+                    if (add_instruction == NO_WIR_INST || program.arena.instructions[wir_id_index(UInt32(add_instruction))].opcode != WirOpcode.Add) {
+                        add_id = right;
+                        mask_id = left;
+                    }
+
+                    let mask_instruction: WirInstID = wir_defining_instruction(ref program, mask_id);
+                    if (mask_instruction != NO_WIR_INST) {
+                        let mask: WirInstruction = program.arena.instructions[wir_id_index(UInt32(mask_instruction))];
+                        if (mask.opcode == WirOpcode.SignedShiftRight && mask.operands.length() == 2) {
+                            let source_id: WirValueID = wir_resolve_alias(mask.operands[0], ref aliases);
+                            if (wir_abs_shift(ref program, mask_id, source_id, type.bits, ref removed, ref aliases) &&
+                                wir_abs_add(ref program, add_id, source_id, mask_id, ref removed, ref aliases)) {
+                                instruction.opcode = WirOpcode.Abs;
+                                instruction.operands = [source_id];
+                                stats.idioms++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i++;
+    }
+}
+
+func wir_active_instructions(ref program: WirModule, block_id: WirBlockID, ref removed: Vector(Bool)) -> Vector(WirInstID) {
+    let result: Vector(WirInstID) = [];
+    let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
+    let i: Int = 0;
+    while (i < block.instructions.length()) {
+        let instruction_id: WirInstID = block.instructions[i];
+        if (!removed[wir_id_index(UInt32(instruction_id))]) { result.append(instruction_id); }
+        i++;
+    }
+    return result;
+}
+
+func wir_recognize_abs_branches(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
+    // Fold the small return diamond produced by `if x < 0 { return -x }`.
+    // This is intentionally not a general if-conversion pass. Both successor
+    // blocks must be private to the branch and contain no work besides the
+    // negate and returns, so replacing the diamond cannot hide a side effect.
+    let uses: Vector(Int) = [];
+    let predecessors: Vector(Int) = [];
+    let i: Int = 0;
+    while (i < program.arena.values.length()) { uses.append(0); i++; }
+    i = 0;
+    while (i < program.arena.blocks.length()) { predecessors.append(0); i++; }
+
+    i = 0;
+    while (i < program.arena.instructions.length()) {
+        if (!removed[i]) {
+            let instruction: WirInstruction = program.arena.instructions[i];
+            let j: Int = 0;
+            while (j < instruction.operands.length()) {
+                let operand_index: Int = wir_id_index(UInt32(wir_resolve_alias(instruction.operands[j], ref aliases)));
+                uses[operand_index] = uses[operand_index] + 1;
+                j++;
+            }
+            j = 0;
+            while (j < instruction.edges.length()) {
+                let target_index: Int = wir_id_index(UInt32(instruction.edges[j].target));
+                predecessors[target_index] = predecessors[target_index] + 1;
+                let k: Int = 0;
+                while (k < instruction.edges[j].arguments.length()) {
+                    let arg_index: Int = wir_id_index(UInt32(wir_resolve_alias(instruction.edges[j].arguments[k], ref aliases)));
+                    uses[arg_index] = uses[arg_index] + 1;
+                    k++;
+                }
+                j++;
+            }
+        }
+        i++;
+    }
+
+    i = 0;
+    while (i < program.arena.blocks.length()) {
+        let block_id = WirBlockID(UInt32(i + 1));
+        let active = wir_active_instructions(ref program, block_id, ref removed);
+        if (active.length() != 0) {
+            let branch_id = active[active.length() - 1];
+            let ptr branch: WirInstruction = ref program.arena.instructions[wir_id_index(UInt32(branch_id))];
+            if (branch.opcode == WirOpcode.Branch && branch.operands.length() == 1 && branch.edges.length() == 2) {
+                let condition_id = wir_resolve_alias(branch.operands[0], ref aliases);
+                let comparison_id = wir_defining_instruction(ref program, condition_id);
+                if (comparison_id != NO_WIR_INST && uses[wir_id_index(UInt32(condition_id))] == 1) {
+                    let ptr comparison: WirInstruction = ref program.arena.instructions[wir_id_index(UInt32(comparison_id))];
+                    if (comparison.opcode == WirOpcode.SignedLess && comparison.operands.length() == 2) {
+                        let source_id = wir_resolve_alias(comparison.operands[0], ref aliases);
+                        let zero_id = wir_resolve_alias(comparison.operands[1], ref aliases);
+                        let type_id = program.arena.values[wir_id_index(UInt32(source_id))].type_id;
+                        let type = program.arena.types[wir_id_index(UInt32(type_id))];
+                        let negative_block = branch.edges[0].target;
+                        let positive_block = branch.edges[1].target;
+                        if (type.kind == WirTypeKind.SignedInt && type.bits > 1 && type.bits <= 64 &&
+                            wir_integer_is(ref program, zero_id, UInt128(0U)) &&
+                            predecessors[wir_id_index(UInt32(negative_block))] == 1 &&
+                            predecessors[wir_id_index(UInt32(positive_block))] == 1) {
+                            let negative = wir_active_instructions(ref program, negative_block, ref removed);
+                            let positive = wir_active_instructions(ref program, positive_block, ref removed);
+                            if (negative.length() == 2 && positive.length() == 1) {
+                                let negate = program.arena.instructions[wir_id_index(UInt32(negative[0]))];
+                                let negative_return = program.arena.instructions[wir_id_index(UInt32(negative[1]))];
+                                let positive_return = program.arena.instructions[wir_id_index(UInt32(positive[0]))];
+                                if (negate.opcode == WirOpcode.Negate && negate.operands.length() == 1 && negate.result != NO_WIR_VALUE &&
+                                    wir_resolve_alias(negate.operands[0], ref aliases) == source_id &&
+                                    negative_return.opcode == WirOpcode.Return && negative_return.operands.length() == 1 &&
+                                    wir_resolve_alias(negative_return.operands[0], ref aliases) == negate.result &&
+                                    positive_return.opcode == WirOpcode.Return && positive_return.operands.length() == 1 &&
+                                    wir_resolve_alias(positive_return.operands[0], ref aliases) == source_id) {
+                                    comparison.opcode = WirOpcode.Abs;
+                                    comparison.type_id = type_id;
+                                    comparison.operands = [source_id];
+                                    program.arena.values[wir_id_index(UInt32(comparison.result))].type_id = type_id;
+                                    branch.opcode = WirOpcode.Return;
+                                    branch.operands = [comparison.result];
+                                    branch.edges = [];
+                                    stats.idioms++;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i++;
+    }
+}
+
 func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) -> Bool {
     if (instruction.result == NO_WIR_VALUE || instruction.operands.length() == 0 || instruction.operands.length() > 2) { return false; }
     let op = instruction.opcode;
-    if (op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor && op != WirOpcode.Not && op != WirOpcode.Negate &&
+    if (op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor && op != WirOpcode.Not && op != WirOpcode.Abs && op != WirOpcode.Negate &&
         op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
         op != WirOpcode.ShiftLeft && op != WirOpcode.SignedShiftRight && op != WirOpcode.UnsignedShiftRight &&
         op != WirOpcode.Truncate && op != WirOpcode.SignExtend && op != WirOpcode.ZeroExtend &&
@@ -697,6 +936,13 @@ func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) ->
     else if (op == WirOpcode.BitOr) { result = lhs | rhs; }
     else if (op == WirOpcode.BitXor) { result = lhs ^ rhs; }
     else if (op == WirOpcode.Not) { result = ~lhs & mask; }
+    else if (op == WirOpcode.Abs) {
+        let sign = UInt128(1U) << UInt128(width - 1);
+        result = lhs;
+        if ((lhs & sign) != UInt128(0U) && lhs != UInt128(0U)) {
+            result = mask - lhs + UInt128(1U);
+        }
+    }
     else if (op == WirOpcode.Negate) {
         if (lhs != UInt128(0U)) { result = mask - lhs + UInt128(1U); }
     }
@@ -754,7 +1000,16 @@ func wir_discardable(ref program: WirModule, ref instruction: WirInstruction) ->
     let op = instruction.opcode;
     if (op == WirOpcode.StackAlloc || op == WirOpcode.StructValue || op == WirOpcode.ArrayValue || op == WirOpcode.Field || op == WirOpcode.FieldAddress) { return true; }
     if (op == WirOpcode.Truncate || op == WirOpcode.SignExtend || op == WirOpcode.ZeroExtend || op == WirOpcode.Bitcast || op == WirOpcode.PointerToInt || op == WirOpcode.IntToPointer) { return true; }
-    if (op == WirOpcode.BitAnd || op == WirOpcode.BitOr || op == WirOpcode.BitXor || op == WirOpcode.Not || op == WirOpcode.Negate) { return true; }
+    if (op == WirOpcode.BitAnd || op == WirOpcode.BitOr || op == WirOpcode.BitXor || op == WirOpcode.Not || op == WirOpcode.Abs || op == WirOpcode.Negate) { return true; }
+    if (op == WirOpcode.ShiftLeft || op == WirOpcode.SignedShiftRight || op == WirOpcode.UnsignedShiftRight) { return true; }
+    if (op == WirOpcode.Equal || op == WirOpcode.NotEqual ||
+        op == WirOpcode.SignedLess || op == WirOpcode.SignedLessEqual || op == WirOpcode.SignedGreater || op == WirOpcode.SignedGreaterEqual ||
+        op == WirOpcode.UnsignedLess || op == WirOpcode.UnsignedLessEqual || op == WirOpcode.UnsignedGreater || op == WirOpcode.UnsignedGreaterEqual) {
+        if (instruction.operands.length() == 0) { return false; }
+        let operand_type = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
+        let kind = program.arena.types[wir_id_index(UInt32(operand_type))].kind;
+        return kind == WirTypeKind.SignedInt || kind == WirTypeKind.UnsignedInt || kind == WirTypeKind.BoolType || kind == WirTypeKind.Pointer;
+    }
     if (op == WirOpcode.Add || op == WirOpcode.Subtract || op == WirOpcode.Multiply) {
         let type = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
         return type.kind == WirTypeKind.SignedInt || type.kind == WirTypeKind.UnsignedInt;
@@ -918,7 +1173,7 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
 }
 
 func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats {
-    let stats = WirOptimizationStats(instructions=0, blocks=0, branches=0, jumps=0, constants=0, copies=0, checks=0, loads=0, stores=0, slots=0, parameters=0, expressions=0);
+    let stats = WirOptimizationStats(instructions=0, blocks=0, branches=0, jumps=0, constants=0, copies=0, checks=0, loads=0, stores=0, slots=0, parameters=0, expressions=0, idioms=0);
     if (level == "-O0") {
         return stats;
     }
@@ -946,6 +1201,8 @@ func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats
     let plan = wir_optimization_plan(level);
     let aliases = wir_forward_stack_slots(ref program, ref folded, ref stats, plan.forwarding_distance);
     wir_propagate_copies(ref program, ref folded, ref aliases, ref stats);
+    wir_recognize_abs(ref program, ref folded, ref aliases, ref stats);
+    wir_recognize_abs_branches(ref program, ref folded, ref aliases, ref stats);
     if (plan.extra_scans > 0) {
         wir_eliminate_repeated_checks(ref program, ref folded, ref aliases, ref stats);
     }

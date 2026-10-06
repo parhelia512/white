@@ -96,6 +96,7 @@ enum WirOpcode {
     FloatLessEqual,
     FloatGreater,
     FloatGreaterEqual,
+    Abs,
     Negate,
     FloatNegate,
     Not,

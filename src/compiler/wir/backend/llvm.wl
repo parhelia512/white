@@ -295,7 +295,7 @@ func llvm_instruction_supported(program: WirModule, instruction: WirInstruction)
            opcode == WirOpcode.StackAlloc || opcode == WirOpcode.Load || opcode == WirOpcode.Store ||
            opcode == WirOpcode.AtomicLoad || opcode == WirOpcode.AtomicStore || opcode == WirOpcode.AtomicRmw || opcode == WirOpcode.Call ||
            opcode == WirOpcode.Jump || opcode == WirOpcode.Branch || opcode == WirOpcode.Return || opcode == WirOpcode.Trap || opcode == WirOpcode.Unreachable ||
-           opcode == WirOpcode.Negate || opcode == WirOpcode.FloatNegate || opcode == WirOpcode.Not;
+           opcode == WirOpcode.Abs || opcode == WirOpcode.Negate || opcode == WirOpcode.FloatNegate || opcode == WirOpcode.Not;
 }
 
 func llvm_collect_backend_errors(program: WirModule) -> Vector(String) {
@@ -471,6 +471,34 @@ func llvm_write_ownership(output: strings.Builder, program: WirModule, instructi
     return;
 }
 
+func llvm_write_abs(output: strings.Builder, program: WirModule, instruction: WirInstruction) -> Void? {
+    let name: String = llvm_value_name(instruction.result);
+    output.write("  ")?;
+    output.write(name)?;
+    output.write(".neg = sub ")?;
+    llvm_write_type(output, program, instruction.type_id)?;
+    output.write(" 0, ")?;
+    llvm_write_value(output, program, instruction.operands[0])?;
+    output.write("\n  ")?;
+    output.write(name)?;
+    output.write(".negative = icmp slt ")?;
+    llvm_write_type(output, program, instruction.type_id)?;
+    output.write(" ")?;
+    llvm_write_value(output, program, instruction.operands[0])?;
+    output.write(", 0\n  ")?;
+    output.write(name)?;
+    output.write(" = select i1 ")?;
+    output.write(name)?;
+    output.write(".negative, ")?;
+    llvm_write_type(output, program, instruction.type_id)?;
+    output.write(" ")?;
+    output.write(name)?;
+    output.write(".neg, ")?;
+    llvm_write_typed_value(output, program, instruction.operands[0])?;
+    output.write("\n")?;
+    return;
+}
+
 func llvm_write_instruction(output: strings.Builder, program: WirModule, instruction_id: WirInstID, instruction: WirInstruction) -> Void? {
     if (llvm_noop_cast(program, instruction)) { return; }
     if (instruction.opcode == WirOpcode.StructValue || instruction.opcode == WirOpcode.ArrayValue) {
@@ -487,6 +515,10 @@ func llvm_write_instruction(output: strings.Builder, program: WirModule, instruc
     }
     if (instruction.opcode == WirOpcode.Retain || instruction.opcode == WirOpcode.Release) {
         llvm_write_ownership(output, program, instruction)?;
+        return;
+    }
+    if (instruction.opcode == WirOpcode.Abs) {
+        llvm_write_abs(output, program, instruction)?;
         return;
     }
     let binary: String = llvm_binary_opcode(program, instruction);

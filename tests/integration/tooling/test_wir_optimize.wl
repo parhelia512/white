@@ -392,6 +392,55 @@ func check_invalid_shift() -> Bool {
     return stats.constants == 0 && program.arena.instructions[0].opcode == WirOpcode.ShiftLeft && verify_wir(program).length() == 0;
 }
 
+func check_abs_idiom() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_signed_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "abs.idiom", [WirParam(name="value", type_id=i32)], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let value = program.arena.functions[wir_id_index(UInt32(function))].parameters[0];
+    let shift = wir_const_int(ref program, i32, UInt128(31U));
+    let mask = wir_append(ref program, entry, WirOpcode.SignedShiftRight, i32, [value, shift], [], no_wir_location());
+    let adjusted = wir_append(ref program, entry, WirOpcode.Add, i32, [value, mask], [], no_wir_location());
+    let result = wir_append(ref program, entry, WirOpcode.BitXor, i32, [adjusted, mask], [], no_wir_location());
+    wir_return(ref program, entry, result, no_wir_location());
+    if (verify_wir(program).length() != 0) { return false; }
+
+    let stats = optimize_wir(ref program, "-O1");
+    if (stats.idioms != 1 || verify_wir(program).length() != 0) { return false; }
+    return program.arena.instructions.length() == 2 && program.arena.instructions[0].opcode == WirOpcode.Abs &&
+           program.arena.instructions[1].opcode == WirOpcode.Return;
+}
+
+func check_abs_branch() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let i32 = wir_signed_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "abs.branch", [WirParam(name="value", type_id=i32)], i32, false, WirLinkage.Exported, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let negative = wir_add_block(ref program, function, "negative", []);
+    let positive = wir_add_block(ref program, function, "positive", []);
+    let value = program.arena.functions[wir_id_index(UInt32(function))].parameters[0];
+    let location = no_wir_location();
+    let slot = wir_stack_alloc(ref program, entry, i32, "value.addr", location);
+    wir_store(ref program, entry, value, slot, location);
+    let compared = wir_load(ref program, entry, slot, "compared", location);
+    let zero = wir_const_int(ref program, i32, UInt128(0U));
+    let below = wir_append(ref program, entry, WirOpcode.SignedLess, program.bool_type, [compared, zero], [], location);
+    wir_append(ref program, entry, WirOpcode.Branch, program.void_type, [below], [wir_edge(negative, []), wir_edge(positive, [])], location);
+    let negative_value = wir_load(ref program, negative, slot, "negative.value", location);
+    let absolute = wir_append(ref program, negative, WirOpcode.Negate, i32, [negative_value], [], location);
+    wir_return(ref program, negative, absolute, location);
+    let positive_value = wir_load(ref program, positive, slot, "positive.value", location);
+    wir_return(ref program, positive, positive_value, location);
+    if (verify_wir(program).length() != 0) { return false; }
+
+    let stats = optimize_wir(ref program, "-O2");
+    if (stats.idioms != 1 || stats.slots != 1 || stats.stores != 1 || stats.loads != 3 || verify_wir(program).length() != 0) {
+        return false;
+    }
+    return program.arena.functions[0].blocks.length() == 1 && program.arena.instructions.length() == 2 &&
+           program.arena.instructions[0].opcode == WirOpcode.Abs && program.arena.instructions[1].opcode == WirOpcode.Return;
+}
+
 func main() -> Int {
     if (!check_cleanup()) { print("FAIL: WIR cleanup or value remapping"); return 1; }
     if (!check_effects()) { print("FAIL: WIR optimization removed observable effects"); return 1; }
@@ -405,6 +454,8 @@ func main() -> Int {
     if (!check_absorbing_identities()) { print("FAIL: WIR absorbing integer identities"); return 1; }
     if (!check_repeated_checks()) { print("FAIL: WIR repeated safety checks"); return 1; }
     if (!check_jump_threading()) { print("FAIL: WIR trivial jump threading"); return 1; }
+    if (!check_abs_idiom()) { print("FAIL: WIR integer abs idiom"); return 1; }
+    if (!check_abs_branch()) { print("FAIL: WIR integer abs branch"); return 1; }
     if (!check_constant(WirOpcode.Add, 8, false, UInt128(255U), UInt128(1U), UInt128(0U), false) ||
         !check_constant(WirOpcode.Subtract, 32, true, UInt128(0U), UInt128(1U), UInt128(4294967295U), false) ||
         !check_constant(WirOpcode.Multiply, 64, false, UInt128(18446744073709551615UL), UInt128(2U), UInt128(18446744073709551614UL), false) ||
@@ -417,6 +468,8 @@ func main() -> Int {
         return 1;
     }
     if (!check_unary_constant(WirOpcode.Negate, 8, UInt128(1U), UInt128(255U)) ||
+        !check_unary_constant(WirOpcode.Abs, 8, UInt128(251U), UInt128(5U)) ||
+        !check_unary_constant(WirOpcode.Abs, 8, UInt128(128U), UInt128(128U)) ||
         !check_unary_constant(WirOpcode.Negate, 128, UInt128(0U), UInt128(0U)) ||
         !check_cast_constant(WirOpcode.Truncate, 64, 8, false, UInt128(4886718345UL), UInt128(137U)) ||
         !check_cast_constant(WirOpcode.SignExtend, 8, 64, true, UInt128(128U), UInt128(18446744073709551488UL)) ||

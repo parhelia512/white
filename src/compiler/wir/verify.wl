@@ -655,6 +655,9 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
     } else if (opcode == WirOpcode.ShiftLeft) {
         wir_check_binary(ref program, instruction, errors);
         if (!wir_is_integer_type(ref program, instruction.type_id)) { wir_report(errors, "shift instruction requires an integer type"); }
+    } else if (opcode == WirOpcode.Abs) {
+        wir_check_unary(ref program, instruction, errors);
+        if (!wir_type_is(ref program, instruction.type_id, WirTypeKind.SignedInt)) { wir_report(errors, "integer absolute value requires a signed integer type"); }
     } else if (opcode == WirOpcode.Negate) {
         wir_check_unary(ref program, instruction, errors);
         if (!wir_is_integer_type(ref program, instruction.type_id)) { wir_report(errors, "integer negation requires an integer type"); }

@@ -2605,6 +2605,33 @@ func x86_lower_instruction(ref program: WirModule,
         return "";
     }
 
+    if (instruction.opcode == WirOpcode.Abs) {
+        if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
+            return "abs instruction has the wrong operand count";
+        }
+        let result_type: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
+        let size: Int = x86_scalar_size(ref program, instruction.type_id);
+        if (result_type.kind != WirTypeKind.SignedInt || size == 0) {
+            return "the x86_64 lowering supports abs on signed integers up to 64 bits";
+        }
+
+        let source: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
+        if (source.message.length() != 0) { return source.message; }
+        let choice: X86RegisterChoice = x86_choose_register_except(ref program, ref state.registers, state.position, source.register);
+        let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
+        if (prepare_error.length() != 0) { return prepare_error; }
+
+        let operation_size: Int = 4;
+        if (size == 8) { operation_size = 8; }
+        x86_move_scalar(ref output, choice.register, source.register, operation_size);
+        x86_unary_register(ref output, choice.register, 3, size == 8);
+        x86_cmov_sign(ref output, choice.register, source.register, size == 8);
+        x86_normalize_scalar(ref output, choice.register, size, true);
+        x86_bind_register(ref state.registers, choice.register, instruction.result);
+        state.accumulator = instruction.result;
+        return "";
+    }
+
     if (instruction.opcode == WirOpcode.Negate || instruction.opcode == WirOpcode.Not) {
         if (instruction.operands.length() != 1 || instruction.result == NO_WIR_VALUE) {
             return "unary instruction has the wrong operand count";
