@@ -29,6 +29,8 @@ func main() -> Int {
     }
 
     x86_bind_register(ref plan, X86Register.RAX, near);
+    x86_bind_register(ref plan, X86Register.R8, first);
+    x86_bind_register(ref plan, X86Register.R9, second);
     x86_bind_register(ref plan, X86Register.R10, far);
     x86_bind_register(ref plan, X86Register.R11, third);
     let victim: X86RegisterChoice = x86_choose_register(ref program, ref plan, 0);

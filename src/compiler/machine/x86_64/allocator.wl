@@ -13,7 +13,8 @@ const X86_NO_NEXT_USE: Int = 2147483647;
 struct X86UseQueue(
     positions: Vector(Int),
     cursor: Int,
-    preferred: X86Register
+    preferred: X86Register,
+    incoming: X86Register
 )
 
 struct X86UseTable(
@@ -152,7 +153,7 @@ func x86_new_use_table(base: Int, dense_count: Int, sparse: Vector(WirValueID)) 
     let queues: Vector(X86UseQueue) = [];
     let i: Int = 0;
     while (i < dense_count + sparse.length()) {
-        queues.append(X86UseQueue(positions=[], cursor=0, preferred=X86Register.None));
+        queues.append(X86UseQueue(positions=[], cursor=0, preferred=X86Register.None, incoming=X86Register.None));
         i++;
     }
 
@@ -197,6 +198,14 @@ func x86_preferred_register(ref table: X86UseTable, value: WirValueID) -> X86Reg
         return X86Register.None;
     }
     return table.queues[index].preferred;
+}
+
+func x86_incoming_register(ref table: X86UseTable, value: WirValueID) -> X86Register {
+    let index: Int = x86_use_index(ref table, value);
+    if (index < 0 || index >= table.queues.length()) {
+        return X86Register.None;
+    }
+    return table.queues[index].incoming;
 }
 
 func x86_collect_uses(ref program: WirModule, order: Vector(WirBlockID)) -> X86UseTable {
@@ -297,11 +306,12 @@ func x86_consume_instruction(ref table: X86UseTable, instruction: WirInstruction
 }
 
 func x86_allocatable_registers() -> Vector(X86Register) {
-    return [X86Register.RAX, X86Register.R10, X86Register.R11];
+    return [X86Register.RAX, X86Register.R10, X86Register.R11, X86Register.R8, X86Register.R9];
 }
 
 func x86_allocatable_register(register: X86Register) -> Bool {
-    return register == X86Register.RAX || register == X86Register.R10 || register == X86Register.R11 ||
+    return register == X86Register.RAX || register == X86Register.R8 || register == X86Register.R9 ||
+           register == X86Register.R10 || register == X86Register.R11 ||
            register == X86Register.XMM0 || register == X86Register.XMM1 || register == X86Register.XMM2 ||
            register == X86Register.XMM3 || register == X86Register.XMM4 || register == X86Register.XMM5;
 }
@@ -315,8 +325,9 @@ func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
         bindings.append(X86RegisterBinding(register=registers[i], value=NO_WIR_VALUE));
         i++;
     }
-    // Integer argument registers remain fixed scratch. The volatile XMM bank
-    // is usable once parameters have either been bound or homed.
+    // RCX and RDX still belong to shifts, division and the memory emitters.
+    // R8/R9 are ordinary caller-saved registers now that those users declare
+    // their clobbers instead of borrowing the registers behind the allocator.
     bindings.append(X86RegisterBinding(register=X86Register.RCX, value=NO_WIR_VALUE));
     bindings.append(X86RegisterBinding(register=X86Register.RDX, value=NO_WIR_VALUE));
     bindings.append(X86RegisterBinding(register=X86Register.XMM0, value=NO_WIR_VALUE));

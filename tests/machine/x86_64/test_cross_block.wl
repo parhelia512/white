@@ -7,6 +7,8 @@ import * from "../../../src/compiler/wir/builder.wl"
 import verify_wir from "../../../src/compiler/wir/verify.wl"
 import X86Object from "../../../src/compiler/machine/x86_64/model.wl"
 import * from "../../../src/compiler/machine/x86_64/lowering.wl"
+import * from "../../../src/compiler/machine/x86_64/allocator.wl"
+import X86Register from "../../../src/compiler/machine/x86_64/model.wl"
 import coff_object from "../../../src/compiler/machine/x86_64/coff.wl"
 
 func number(ref program: WirModule, type_id: WirTypeID, value: Int) -> WirValueID {
@@ -143,6 +145,14 @@ func main() -> Int {
     }
     if (!carries_registers) {
         print("FAIL: straight cross-block edge discarded the register state");
+        return 1;
+    }
+    let loop_order: Vector(WirBlockID) = x86_block_order(program.arena.functions[wir_id_index(UInt32(loop))]);
+    let loop_uses: X86UseTable = x86_collect_uses(ref program, loop_order);
+    x86_mark_return_registers(ref program, loop_order, ref loop_uses);
+    x86_mark_edge_registers(ref program, loop_order, ref loop_uses);
+    if (x86_incoming_register(ref loop_uses, index) != X86Register.None) {
+        print("FAIL: loop header bypassed the stack fallback");
         return 1;
     }
     let lowered: X86ModuleResult = x86_lower_module(ref program);
