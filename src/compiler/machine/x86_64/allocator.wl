@@ -12,7 +12,8 @@ const X86_NO_NEXT_USE: Int = 2147483647;
 
 struct X86UseQueue(
     positions: Vector(Int),
-    cursor: Int
+    cursor: Int,
+    preferred: X86Register
 )
 
 struct X86UseTable(
@@ -151,7 +152,7 @@ func x86_new_use_table(base: Int, dense_count: Int, sparse: Vector(WirValueID)) 
     let queues: Vector(X86UseQueue) = [];
     let i: Int = 0;
     while (i < dense_count + sparse.length()) {
-        queues.append(X86UseQueue(positions=[], cursor=0));
+        queues.append(X86UseQueue(positions=[], cursor=0, preferred=X86Register.None));
         i++;
     }
 
@@ -177,6 +178,25 @@ func x86_record_use(ref table: X86UseTable, value: WirValueID, position: Int) ->
     let queue: X86UseQueue = table.queues[index];
     queue.positions.append(position);
     table.queues[index] = queue;
+}
+
+func x86_prefer_register(ref table: X86UseTable, value: WirValueID, register: X86Register) -> Void {
+    let index: Int = x86_use_index(ref table, value);
+    if (index < 0 || index >= table.queues.length()) {
+        return;
+    }
+
+    let queue: X86UseQueue = table.queues[index];
+    queue.preferred = register;
+    table.queues[index] = queue;
+}
+
+func x86_preferred_register(ref table: X86UseTable, value: WirValueID) -> X86Register {
+    let index: Int = x86_use_index(ref table, value);
+    if (index < 0 || index >= table.queues.length()) {
+        return X86Register.None;
+    }
+    return table.queues[index].preferred;
 }
 
 func x86_collect_uses(ref program: WirModule, order: Vector(WirBlockID)) -> X86UseTable {
@@ -277,8 +297,13 @@ func x86_consume_instruction(ref table: X86UseTable, instruction: WirInstruction
 }
 
 func x86_allocatable_registers() -> Vector(X86Register) {
-    // argument registers stay untouched until call lowering can preserve them
     return [X86Register.RAX, X86Register.R10, X86Register.R11];
+}
+
+func x86_allocatable_register(register: X86Register) -> Bool {
+    return register == X86Register.RAX || register == X86Register.R10 || register == X86Register.R11 ||
+           register == X86Register.XMM0 || register == X86Register.XMM1 || register == X86Register.XMM2 ||
+           register == X86Register.XMM3 || register == X86Register.XMM4 || register == X86Register.XMM5;
 }
 
 func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
@@ -290,7 +315,14 @@ func x86_register_plan(uses: X86UseTable) -> X86RegisterPlan {
         bindings.append(X86RegisterBinding(register=registers[i], value=NO_WIR_VALUE));
         i++;
     }
-    // XMM0..3 remain reserved for incoming and outgoing arguments
+    // Integer argument registers remain fixed scratch. The volatile XMM bank
+    // is usable once parameters have either been bound or homed.
+    bindings.append(X86RegisterBinding(register=X86Register.RCX, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.RDX, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM0, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM1, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM2, value=NO_WIR_VALUE));
+    bindings.append(X86RegisterBinding(register=X86Register.XMM3, value=NO_WIR_VALUE));
     bindings.append(X86RegisterBinding(register=X86Register.XMM4, value=NO_WIR_VALUE));
     bindings.append(X86RegisterBinding(register=X86Register.XMM5, value=NO_WIR_VALUE));
     return X86RegisterPlan(uses=uses, bindings=bindings);
@@ -749,7 +781,8 @@ func x86_choose_register_except(ref program: WirModule, ref plan: X86RegisterPla
 func x86_choose_register_class(ref program: WirModule, ref plan: X86RegisterPlan, position: Int, avoid: X86Register, floating: Bool) -> X86RegisterChoice {
     let i = 0;
     while (i < plan.bindings.length()) {
-        if (plan.bindings[i].register != avoid && x86_is_xmm(plan.bindings[i].register) == floating && plan.bindings[i].value == NO_WIR_VALUE) {
+        if (x86_allocatable_register(plan.bindings[i].register) && plan.bindings[i].register != avoid &&
+            x86_is_xmm(plan.bindings[i].register) == floating && plan.bindings[i].value == NO_WIR_VALUE) {
             return X86RegisterChoice(register=plan.bindings[i].register, evicted=NO_WIR_VALUE);
         }
 
@@ -761,7 +794,8 @@ func x86_choose_register_class(ref program: WirModule, ref plan: X86RegisterPlan
     let selected_remat: Bool = false;
     i = 0;
     while (i < plan.bindings.length()) {
-        if (plan.bindings[i].register == avoid || x86_is_xmm(plan.bindings[i].register) != floating) {
+        if (!x86_allocatable_register(plan.bindings[i].register) || plan.bindings[i].register == avoid ||
+            x86_is_xmm(plan.bindings[i].register) != floating) {
             i++;
             continue;
         }
@@ -789,7 +823,8 @@ func x86_choose_register_avoiding(ref program: WirModule, ref plan: X86RegisterP
     let i = 0;
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
-        if (!x86_is_xmm(binding.register) && binding.register != first && binding.register != second && binding.value == NO_WIR_VALUE) {
+        if (x86_allocatable_register(binding.register) && !x86_is_xmm(binding.register) &&
+            binding.register != first && binding.register != second && binding.value == NO_WIR_VALUE) {
             return X86RegisterChoice(register=binding.register, evicted=NO_WIR_VALUE);
         }
 
@@ -802,7 +837,8 @@ func x86_choose_register_avoiding(ref program: WirModule, ref plan: X86RegisterP
     i = 0;
     while (i < plan.bindings.length()) {
         let binding: X86RegisterBinding = plan.bindings[i];
-        if (!x86_is_xmm(binding.register) && binding.register != first && binding.register != second) {
+        if (x86_allocatable_register(binding.register) && !x86_is_xmm(binding.register) &&
+            binding.register != first && binding.register != second) {
             let next_use: Int = x86_pending_use(ref plan.uses, binding.value, position);
             let remat: Bool = x86_rematerializable(ref program, binding.value);
             if (next_use > selected_use || (next_use == selected_use && remat && !selected_remat)) {

@@ -40,6 +40,13 @@ func main() -> Int {
     let signature: WirTypeID = program.arena.functions[wir_id_index(UInt32(callback))].type_id;
     let callback_global: WirGlobalID = wir_add_global(ref program, "callback_address", signature, wir_const_address(ref program, signature, wir_function_value(ref program, callback), 0L), WirLinkage.Internal, true);
 
+    let straight: WirFuncID = wir_add_function(ref program, "straight", [], i32, false, WirLinkage.Internal, WirABI.White);
+    let straight_entry: WirBlockID = wir_add_block(ref program, straight, "entry", []);
+    let straight_next: WirBlockID = wir_add_block(ref program, straight, "next", []);
+    let straight_value: WirValueID = wir_binary(ref program, straight_entry, WirOpcode.Add, i32, number(ref program, i32, 40), number(ref program, i32, 2), "value", no_wir_location());
+    jump(ref program, straight_entry, straight_next);
+    wir_return(ref program, straight_next, straight_value, no_wir_location());
+
     // both arms use an entry value; calls force the register cache to be discarded
     let diamond: WirFuncID = wir_add_function(ref program, "diamond", [WirParam(name="choose", type_id=program.bool_type)], i32, false, WirLinkage.Internal, WirABI.White);
     let entry: WirBlockID = wir_add_block(ref program, diamond, "entry", []);
@@ -122,6 +129,20 @@ func main() -> Int {
     let cross: X86ValueFlags = x86_cross_block_values(ref program, x86_block_order(program.arena.functions[wir_id_index(UInt32(reordered))]));
     if (!x86_flag(cross, late)) {
         print("FAIL: cross-block classification depends on block order");
+        return 1;
+    }
+    let order: Vector(WirBlockID) = x86_block_order(program.arena.functions[wir_id_index(UInt32(straight))]);
+    let predecessors: Vector(Int) = x86_predecessor_counts(ref program, order);
+    let carries_registers: Bool = false;
+    i = 0;
+    while (i < order.length()) {
+        if (x86_carry_registers_to_next(ref program, order, predecessors, i)) {
+            carries_registers = true;
+        }
+        i++;
+    }
+    if (!carries_registers) {
+        print("FAIL: straight cross-block edge discarded the register state");
         return 1;
     }
     let lowered: X86ModuleResult = x86_lower_module(ref program);

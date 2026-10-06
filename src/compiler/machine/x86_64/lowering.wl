@@ -188,6 +188,30 @@ func x86_scalar_float(ref program: WirModule, type_id: WirTypeID) -> Bool {
     return index >= 0 && index < program.arena.types.length() && program.arena.types[index].kind == WirTypeKind.FloatType;
 }
 
+func x86_mark_return_registers(ref program: WirModule, order: Vector(WirBlockID), ref uses: X86UseTable) -> Void {
+    let block_index: Int = 0;
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        let instruction_index: Int = 0;
+        while (instruction_index < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[instruction_index]))];
+            if (instruction.opcode == WirOpcode.Return && instruction.operands.length() == 1) {
+                let value_id: WirValueID = instruction.operands[0];
+                let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+                if (x86_scalar_size(ref program, value.type_id) != 0) {
+                    let preferred: X86Register = X86Register.RAX;
+                    if (x86_scalar_float(ref program, value.type_id)) {
+                        preferred = X86Register.XMM0;
+                    }
+                    x86_prefer_register(ref uses, value_id, preferred);
+                }
+            }
+            instruction_index++;
+        }
+        block_index++;
+    }
+}
+
 func x86_move_scalar(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, size: Int) -> Bool {
     if (x86_is_xmm(destination) && x86_is_xmm(source)) { return x86_sse_register(ref output, 16, destination, source, size); }
     if (x86_is_xmm(destination)) { return x86_sse_bits(ref output, destination, source, size, true); }
@@ -252,6 +276,57 @@ func x86_block_order(function: WirFunction) -> Vector(WirBlockID) {
     }
 
     return order;
+}
+
+func x86_predecessor_counts(ref program: WirModule, order: Vector(WirBlockID)) -> Vector(Int) {
+    let counts: Vector(Int) = [];
+    let i: Int = 0;
+    while (i < program.arena.blocks.length()) {
+        counts.append(0);
+        i++;
+    }
+
+    let block_index: Int = 0;
+    while (block_index < order.length()) {
+        let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+        i = 0;
+        while (i < block.instructions.length()) {
+            let instruction: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[i]))];
+            let edge_index: Int = 0;
+            while (edge_index < instruction.edges.length()) {
+                let target: Int = wir_id_index(UInt32(instruction.edges[edge_index].target));
+                if (target >= 0 && target < counts.length()) {
+                    counts[target] = counts[target] + 1;
+                }
+                edge_index++;
+            }
+            i++;
+        }
+        block_index++;
+    }
+    return counts;
+}
+
+func x86_carry_registers_to_next(ref program: WirModule, order: Vector(WirBlockID), predecessors: Vector(Int), block_index: Int) -> Bool {
+    if (block_index + 1 >= order.length()) {
+        return false;
+    }
+    let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(order[block_index]))];
+    if (block.instructions.length() == 0) {
+        return false;
+    }
+
+    let terminator: WirInstruction = program.arena.instructions[wir_id_index(UInt32(block.instructions[block.instructions.length() - 1]))];
+    if (terminator.opcode != WirOpcode.Jump || terminator.edges.length() != 1 || terminator.edges[0].arguments.length() != 0 ||
+        terminator.edges[0].target != order[block_index + 1]) {
+        return false;
+    }
+
+    let target_index: Int = wir_id_index(UInt32(terminator.edges[0].target));
+    if (target_index < 0 || target_index >= predecessors.length() || predecessors[target_index] != 1) {
+        return false;
+    }
+    return program.arena.blocks[target_index].parameters.length() == 0;
 }
 
 func x86_flag_index(flags: X86ValueFlags, value: WirValueID) -> Int {
@@ -964,6 +1039,49 @@ func x86_bound_value(plan: X86RegisterPlan, register: X86Register) -> WirValueID
 
 func x86_prepare_fixed_register(ref program: WirModule, ref state: X86BlockState, register: X86Register, ref output: X86CodeBuffer) -> String {
     return x86_prepare_register(ref program, ref state, X86RegisterChoice(register=register, evicted=x86_bound_value(state.registers, register)), ref output);
+}
+
+func x86_result_register_available(ref program: WirModule, ref state: X86BlockState, register: X86Register) -> Bool {
+    let value: WirValueID = x86_bound_value(state.registers, register);
+    if (value == NO_WIR_VALUE || x86_pending_use(ref state.registers.uses, value, state.position) == X86_NO_NEXT_USE) {
+        return true;
+    }
+    return x86_rematerializable(ref program, value) || x86_stack_offset(ref state.stack, value) != 0 ||
+           x86_spill_offset(ref state.spills, value) != 0;
+}
+
+func x86_choose_result_register(ref program: WirModule, ref state: X86BlockState, result: WirValueID, avoid: X86Register, floating: Bool) -> X86RegisterChoice {
+    let preferred: X86Register = x86_preferred_register(ref state.registers.uses, result);
+    let abi_result: Bool = (!floating && preferred == X86Register.RAX) || (floating && preferred == X86Register.XMM0);
+    if (abi_result && preferred != avoid && x86_result_register_available(ref program, ref state, preferred)) {
+        return X86RegisterChoice(register=preferred, evicted=x86_bound_value(state.registers, preferred));
+    }
+    return x86_choose_register_class(ref program, ref state.registers, state.position, avoid, floating);
+}
+
+func x86_choose_result_register_avoiding(ref program: WirModule, ref state: X86BlockState, result: WirValueID, first: X86Register, second: X86Register) -> X86RegisterChoice {
+    let preferred: X86Register = x86_preferred_register(ref state.registers.uses, result);
+    if (preferred != X86Register.None && preferred != first && preferred != second &&
+        x86_allocatable_register(preferred) && !x86_is_xmm(preferred) &&
+        x86_result_register_available(ref program, ref state, preferred)) {
+        return X86RegisterChoice(register=preferred, evicted=x86_bound_value(state.registers, preferred));
+    }
+    return x86_choose_register_avoiding(ref program, ref state.registers, state.position, first, second);
+}
+
+func x86_bind_entry_parameters(ref program: WirModule, ref function: WirFunction, ref plan: X86RegisterPlan) -> Void {
+    let i: Int = 0;
+    while (i < function.parameters.length() && i < 4) {
+        let value_id: WirValueID = function.parameters[i];
+        let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
+        if (x86_scalar_size(ref program, value.type_id) != 0) {
+            let incoming: X86Register = x86_win64_argument_register(i, x86_scalar_float(ref program, value.type_id));
+            if (incoming != X86Register.None) {
+                x86_bind_register(ref plan, incoming, value_id);
+            }
+        }
+        i++;
+    }
 }
 
 func x86_overwrite_operand(ref program: WirModule, ref state: X86BlockState, register: X86Register, ref output: X86CodeBuffer) -> String {
@@ -2067,12 +2185,13 @@ func x86_lower_instruction(ref program: WirModule,
         }
         let floating: Bool = x86_scalar_float(ref program, instruction.type_id);
         let choice: X86RegisterChoice = X86RegisterChoice(register=X86Register.None, evicted=NO_WIR_VALUE);
-        if (offset == 0 && !floating && x86_next_use(ref state.registers.uses, instruction.operands[0], state.position) == X86_NO_NEXT_USE) {
+        if (offset == 0 && !floating && x86_next_use(ref state.registers.uses, instruction.operands[0], state.position) == X86_NO_NEXT_USE &&
+            x86_preferred_register(ref state.registers.uses, instruction.result) == X86Register.None) {
             // mov reg, [reg] is safe once the address has no later use
             x86_clear_register(ref state.registers, base);
             choice = X86RegisterChoice(register=base, evicted=NO_WIR_VALUE);
         } else {
-            choice = x86_choose_register_class(ref program, ref state.registers, state.position, base, floating);
+            choice = x86_choose_result_register(ref program, ref state, instruction.result, base, floating);
         }
 
         let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
@@ -2109,7 +2228,7 @@ func x86_lower_instruction(ref program: WirModule,
         }
         let source: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
         if (source.message.length() != 0) { return source.message; }
-        let choice: X86RegisterChoice = x86_choose_register_class(ref program, ref state.registers, state.position, source.register, to_float);
+        let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, source.register, to_float);
         let prepare_error = x86_prepare_register(ref program, ref state, choice, ref output);
         if (prepare_error.length() != 0) { return prepare_error; }
         if (unsigned && integer_size == 8) {
@@ -2166,7 +2285,7 @@ func x86_lower_instruction(ref program: WirModule,
         if (source.message.length() != 0) { return source.message; }
         if (instruction.opcode == WirOpcode.Bitcast) {
             if (source_size != target_size) { return "bitcast operands must have equal widths"; }
-            let choice: X86RegisterChoice = x86_choose_register_class(ref program, ref state.registers, state.position, X86Register.None, x86_scalar_float(ref program, instruction.type_id));
+            let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, X86Register.None, x86_scalar_float(ref program, instruction.type_id));
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             x86_move_scalar(ref output, choice.register, source.register, source_size);
@@ -2257,7 +2376,7 @@ func x86_lower_instruction(ref program: WirModule,
         if (source.message.length() != 0) { return source.message; }
         let destination: X86Register = source.register;
         if (x86_next_use(ref state.registers.uses, source_id, state.position) != X86_NO_NEXT_USE) {
-            let choice: X86RegisterChoice = x86_choose_register_except(ref program, ref state.registers, state.position, source.register);
+            let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, source.register, false);
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             destination = choice.register;
@@ -2295,7 +2414,7 @@ func x86_lower_instruction(ref program: WirModule,
             if (field.kind != WirValueKind.Integer || field.integer >= UInt128(layout.field_offsets.length())) { return "field address has an invalid field index"; }
             let offset: UInt64 = layout.field_offsets[Int(field.integer)];
             if (offset > 2147483647UL) { return "field offset exceeds the x86_64 displacement range"; }
-            let choice: X86RegisterChoice = x86_choose_register_except(ref program, ref state.registers, state.position, base.register);
+            let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, base.register, false);
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             x86_lea(ref output, choice.register, base.register, X86Register.None, 1, Int(offset));
@@ -2309,7 +2428,7 @@ func x86_lower_instruction(ref program: WirModule,
             if (!layout.valid || layout.size > 2147483647UL || index_size == 0) { return "index address has an unsupported index width or element stride"; }
             let index: X86RegisterResult = x86_materialize_register_except(ref program, ref function, index_id, slots, ref state, base.register, ref output);
             if (index.message.length() != 0) { return index.message; }
-            let choice: X86RegisterChoice = x86_choose_register_avoiding(ref program, ref state.registers, state.position, base.register, index.register);
+            let choice: X86RegisterChoice = x86_choose_result_register_avoiding(ref program, ref state, instruction.result, base.register, index.register);
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             if (index_size == 8) { x86_mov_register64(ref output, choice.register, index.register); }
@@ -2337,7 +2456,7 @@ func x86_lower_instruction(ref program: WirModule,
         let size = x86_scalar_size(ref program, instruction.type_id);
         let source: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
         if (source.message.length() != 0) { return source.message; }
-        let destination: X86RegisterChoice = x86_choose_register_class(ref program, ref state.registers, state.position, source.register, true);
+        let destination: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, source.register, true);
         let prepare_error = x86_prepare_register(ref program, ref state, destination, ref output);
         if (prepare_error.length() != 0) { return "floating negate destination: " + prepare_error; }
         let bits: X86RegisterChoice = x86_choose_register_except(ref program, ref state.registers, state.position, X86Register.None);
@@ -2425,7 +2544,7 @@ func x86_lower_instruction(ref program: WirModule,
             if reuse_right {
                 destination = right_register;
             } else {
-                let choice: X86RegisterChoice = x86_choose_register_avoiding(ref program, ref state.registers, state.position, left.register, right_register);
+                let choice: X86RegisterChoice = x86_choose_result_register_avoiding(ref program, ref state, instruction.result, left.register, right_register);
                 let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
                 if (prepare_error.length() != 0) {
                     return prepare_error;
@@ -2502,7 +2621,7 @@ func x86_lower_instruction(ref program: WirModule,
 
         let destination: X86Register = left.register;
         if (x86_next_use(ref state.registers.uses, left_id, state.position) != X86_NO_NEXT_USE) {
-            let choice: X86RegisterChoice = x86_choose_register_avoiding(ref program, ref state.registers, state.position, left.register, right_register);
+            let choice: X86RegisterChoice = x86_choose_result_register_avoiding(ref program, ref state, instruction.result, left.register, right_register);
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             destination = choice.register;
@@ -2552,7 +2671,7 @@ func x86_lower_instruction(ref program: WirModule,
 
         let destination: X86Register = left.register;
         if (x86_next_use(ref state.registers.uses, left_id, state.position) != X86_NO_NEXT_USE) {
-            let choice: X86RegisterChoice = x86_choose_register_avoiding(ref program, ref state.registers, state.position, left.register, right_register);
+            let choice: X86RegisterChoice = x86_choose_result_register_avoiding(ref program, ref state, instruction.result, left.register, right_register);
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             destination = choice.register;
@@ -2615,9 +2734,10 @@ func x86_lower_instruction(ref program: WirModule,
             return "the x86_64 lowering supports abs on signed integers up to 64 bits";
         }
 
-        let source: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
+        let preferred: X86Register = x86_preferred_register(ref state.registers.uses, instruction.result);
+        let source: X86RegisterResult = x86_materialize_register_except(ref program, ref function, instruction.operands[0], slots, ref state, preferred, ref output);
         if (source.message.length() != 0) { return source.message; }
-        let choice: X86RegisterChoice = x86_choose_register_except(ref program, ref state.registers, state.position, source.register);
+        let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, source.register, false);
         let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
         if (prepare_error.length() != 0) { return prepare_error; }
 
@@ -2648,7 +2768,7 @@ func x86_lower_instruction(ref program: WirModule,
         if (source.message.length() != 0) { return source.message; }
         let destination: X86Register = source.register;
         if (x86_next_use(ref state.registers.uses, source_id, state.position) != X86_NO_NEXT_USE) {
-            let choice: X86RegisterChoice = x86_choose_register_except(ref program, ref state.registers, state.position, source.register);
+            let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, source.register, false);
             let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
             if (prepare_error.length() != 0) { return prepare_error; }
             destination = choice.register;
@@ -2679,7 +2799,7 @@ func x86_lower_instruction(ref program: WirModule,
         if (left.message.length() != 0) { return left.message; }
         let right: X86RegisterResult = x86_materialize_register_except(ref program, ref function, instruction.operands[1], slots, ref state, left.register, ref output);
         if (right.message.length() != 0) { return right.message; }
-        let choice: X86RegisterChoice = x86_choose_register(ref program, ref state.registers, state.position);
+        let choice: X86RegisterChoice = x86_choose_result_register(ref program, ref state, instruction.result, X86Register.None, false);
         let prepare_error = x86_prepare_register(ref program, ref state, choice, ref output);
         if (prepare_error.length() != 0) { return prepare_error; }
         let comparison: X86Opcode = X86Opcode.Je;
@@ -2753,7 +2873,10 @@ func x86_lower_instruction(ref program: WirModule,
             }
         }
         let choice: X86RegisterChoice = X86RegisterChoice(register=X86Register.None, evicted=NO_WIR_VALUE);
-        if (result_register != X86Register.None) {
+        if (x86_preferred_register(ref state.registers.uses, instruction.result) == X86Register.RAX &&
+            x86_result_register_available(ref program, ref state, X86Register.RAX)) {
+            choice = x86_choose_result_register(ref program, ref state, instruction.result, X86Register.None, false);
+        } else if (result_register != X86Register.None) {
             // cmp has consumed both operands, so setcc can reuse a dead operand register
             x86_clear_register(ref state.registers, result_register);
             choice = X86RegisterChoice(register=result_register, evicted=NO_WIR_VALUE);
@@ -2816,8 +2939,25 @@ func x86_lower_instruction(ref program: WirModule,
             }
             argument_index++;
         }
-        if hidden {
-            x86_lea(ref output, X86Register.RCX, X86Register.RSP, X86Register.None, 1, storage.result);
+        // Every live operand has a home or a spill now, so argument setup can
+        // forget the old register map. Binding each ABI destination keeps a
+        // later argument from borrowing and overwriting it.
+        x86_reset_registers(ref state.registers);
+        let indirect_target: X86Register = X86Register.None;
+        if (callee.kind != WirValueKind.Function) {
+            let target: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
+            if (target.message.length() != 0) {
+                return target.message;
+            }
+            indirect_target = X86Register.R11;
+            if (target.register != indirect_target) {
+                let target_error: String = x86_prepare_fixed_register(ref program, ref state, indirect_target, ref output);
+                if (target_error.length() != 0) {
+                    return target_error;
+                }
+                x86_mov_register64(ref output, indirect_target, target.register);
+            }
+            x86_bind_register(ref state.registers, indirect_target, instruction.operands[0]);
         }
 
         argument_index = 0;
@@ -2827,11 +2967,10 @@ func x86_lower_instruction(ref program: WirModule,
             if (storage.arguments[argument_index] >= 0) {
                 size = 8;
                 let choice: X86RegisterChoice = x86_choose_register(ref program, ref state.registers, state.position);
-                let prepare_error = x86_prepare_register(ref program, ref state, choice, ref output);
+                let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
                 if (prepare_error.length() != 0) {
                     return prepare_error;
                 }
-
                 x86_lea(ref output, choice.register, X86Register.RSP, X86Register.None, 1, storage.arguments[argument_index]);
                 argument.register = choice.register;
             } else {
@@ -2845,37 +2984,36 @@ func x86_lower_instruction(ref program: WirModule,
             }
 
             let position: Int = argument_index;
-            if hidden {
+            if (hidden) {
                 position++;
             }
             if (position < 4) {
-                let destination: X86Register = x86_win64_argument_register(position, x86_scalar_float(ref program, signature.parameters[argument_index]));
+                let floating: Bool = storage.arguments[argument_index] < 0 && x86_scalar_float(ref program, signature.parameters[argument_index]);
+                let destination: X86Register = x86_win64_argument_register(position, floating);
                 if (destination == X86Register.None) {
                     return "the x86_64 ABI has no register for this argument";
                 }
                 if (argument.register != destination) {
                     x86_move_scalar(ref output, destination, argument.register, size);
                 }
+                x86_bind_register(ref state.registers, destination, instruction.operands[argument_index + 1]);
             } else {
                 let offset: Int = x86_win64_stack_arg_offset(position);
-                if (offset < 0) {
+                if (offset < 0 || !x86_store_scalar(ref output, argument.register, X86Register.RSP, offset, size)) {
                     return "the x86_64 ABI has no stack location for this argument";
                 }
-                x86_store_scalar(ref output, argument.register, X86Register.RSP, offset, size);
             }
-            argument_index += 1;
+            argument_index++;
+        }
+        if (hidden) {
+            x86_lea(ref output, X86Register.RCX, X86Register.RSP, X86Register.None, 1, storage.result);
         }
 
         if (callee.kind == WirValueKind.Function) {
             let target_function: WirFuncID = WirFuncID(callee.owner);
             calls.append(X86CallFixup(offset=x86_call_rel32(ref output), target=target_function));
         } else {
-            // scratch registers do not overlap the four win64 argument registers
-            let target: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
-            if (target.message.length() != 0) {
-                return target.message;
-            }
-            if (!x86_call_register(ref output, target.register)) {
+            if (!x86_call_register(ref output, indirect_target)) {
                 return "the x86_64 encoder rejected the indirect call target";
             }
         }
@@ -3102,7 +3240,7 @@ func x86_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
 
     let located_values: Int = analysis.located_values;
     let home_parameters: Bool = analysis.home_parameters;
-    if indirect_return {
+    if (indirect_return || order.length() > 1) {
         home_parameters = true;
     }
     let cross: X86ValueFlags = x86_cross_block_values(ref program, order);
@@ -3124,6 +3262,7 @@ func x86_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
         block_index++;
     }
     let uses: X86UseTable = x86_collect_uses(ref program, order);
+    x86_mark_return_registers(ref program, order, ref uses);
     let slots: Vector(X86StackSlot) = x86_stack_slots_with_uses(ref program, function, order, home_parameters, cross, layouts, uses);
     if (home_parameters) { located_values += function.parameters.length(); }
     if (slots.length() != located_values) { return x86_lowering_error("the x86_64 lowering could not lay out a stack slot"); }
@@ -3136,7 +3275,7 @@ func x86_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
 
     // the smaller register bank gives a conservative mixed-class spill bound
     if (analysis.has_float) {
-        register_count = 2;
+        register_count = 3;
     }
     let spill_count: Int = x86_spill_capacity(ref program, order, ref uses, register_count);
 
@@ -3184,14 +3323,22 @@ func x86_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
         return x86_lowering_error("the x86_64 lowering could not save function parameters");
     }
 
+    let predecessors: Vector(Int) = x86_predecessor_counts(ref program, order);
+    let carry_registers: Bool = false;
     block_index = 0;
     while (block_index < order.length()) {
         let block_id: WirBlockID = order[block_index];
         let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
         offsets.append(X86BlockOffset(block=block_id, offset=output.bytes.length()));
-        // fixed homes survive block boundaries; transient register and spill bindings do not
-        x86_reset_registers(ref register_plan);
-        x86_reset_spills(ref spill_plan);
+        // A straight edge with one predecessor has one unambiguous machine
+        // state. Merge blocks still start from fixed homes.
+        if (!carry_registers) {
+            x86_reset_registers(ref register_plan);
+            x86_reset_spills(ref spill_plan);
+        }
+        if (block_index == 0 && order.length() == 1 && !home_parameters) {
+            x86_bind_entry_parameters(ref program, ref function, ref register_plan);
+        }
 
         let state: X86BlockState = X86BlockState(accumulator=NO_WIR_VALUE, flags_value=NO_WIR_VALUE, flags_opcode=X86Opcode.Invalid, registers=register_plan, spills=spill_plan, stack=stack, layouts=layouts, retain_function=retain_function, release_function=release_function, null_function=null_function, bounds_function=bounds_function, return_pointer=return_pointer, position=position, message="");
         let instruction_index: Int = 0;
@@ -3219,6 +3366,9 @@ func x86_lower_function_with_layouts(ref program: WirModule, function_id: WirFun
             instruction_index += 1;
         }
 
+        register_plan = state.registers;
+        spill_plan = state.spills;
+        carry_registers = x86_carry_registers_to_next(ref program, order, predecessors, block_index);
         position = state.position;
         block_index += 1;
     }
