@@ -30,17 +30,22 @@ func pointer_int(arena: AstArena, value: String, pos: Position) -> NodeID {
     return add_int_node(ref arena, IntNode(type=NODE_INT, tok=pointer_token(TOK_INT, value), pos=pos));
 }
 
+func pointer_type(arena: AstArena, level: Int, pos: Position) -> NodeID {
+    let base: NodeID = pointer_access(arena, "Int", pos);
+    return add_pointer_type_node(ref arena, PointerTypeNode(type=NODE_PTR_TYPE, base_type=base, level=level, pos=pos));
+}
+
 func main() -> Int {
-    let source: Compiler = Compiler(arena=new_ast_arena(), type_counter=100, ptr_cache=Dict(), ptr_base_map=Dict());
+    let source: Compiler = Compiler(arena=new_ast_arena(), type_counter=100, ptr_cache=Dict(), ptr_base_map=Dict(), generic_bindings=Dict());
     let pos: Position = pointer_position();
 
     let local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "x"), type_node=NO_NODE, value=pointer_int(source.arena, "5", pos), is_const=false, annotations=[], pos=pos, alloc_id=0));
     let reference: NodeID = add_ref_node(ref source.arena, RefNode(type=NODE_REF, node=pointer_access(source.arena, "x", pos), pos=pos));
-    let pointer_local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "p"), type_node=NO_NODE, value=reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let pointer_local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "p"), type_node=pointer_type(source.arena, 1, pos), value=reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
     let pointer_value: NodeID = add_deref_node(ref source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "p", pos), level=1, pos=pos));
     let assignment: NodeID = add_ptr_assign_node(ref source.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=pointer_value, value=pointer_int(source.arena, "7", pos), pos=pos));
     let pointer_reference: NodeID = add_ref_node(ref source.arena, RefNode(type=NODE_REF, node=pointer_access(source.arena, "p", pos), pos=pos));
-    let pointer_pointer_local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "pp"), type_node=NO_NODE, value=pointer_reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
+    let pointer_pointer_local: NodeID = add_var_decl_node(ref source.arena, VarDeclareNode(type=NODE_VAR_DECL, name_tok=pointer_token(TOK_IDENTIFIER, "pp"), type_node=pointer_type(source.arena, 2, pos), value=pointer_reference, is_const=false, annotations=[], pos=pos, alloc_id=0));
     let pointer_pointer_value: NodeID = add_deref_node(ref source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "pp", pos), level=2, pos=pos));
     let pointer_pointer_assignment: NodeID = add_ptr_assign_node(ref source.arena, PtrAssignNode(type=NODE_PTR_ASSIGN, pointer=pointer_pointer_value, value=pointer_int(source.arena, "9", pos), pos=pos));
     let result: NodeID = add_deref_node(ref source.arena, DerefNode(type=NODE_DEREF, node=pointer_access(source.arena, "pp", pos), level=2, pos=pos));

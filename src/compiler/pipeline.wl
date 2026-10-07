@@ -46,12 +46,20 @@ func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> V
         let module: ParsedModule = c.all_modules[i];
         set_module_context(ref c, module);
         bind_module_prelude(ref c, Position(idx=0, ln=0, col=0, text="", fn=module.path));
+        bind_module_imports(ref c, module);
         i++;
     }
 
     if verbose { print("Analyzing declarations"); }
     analyze_declarations(ref c);
     c.is_precompile_phase = false;
+
+    // collision checks need the complete declaration table, replaying the saved maps would hide import order
+    i = 0;
+    while (i < c.all_modules.length()) {
+        validate_module_imports(ref c, c.all_modules[i]);
+        i++;
+    }
 }
 
 func prepare_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> Void {

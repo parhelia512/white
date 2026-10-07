@@ -77,7 +77,7 @@ func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
 
     let key: String = name;
     let info: SymbolInfo = SymbolInfo();
-    if (source.current_package_prefix.length() != 0) {
+    if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
         key = source.current_package_prefix + name;
         info = source.global_symbol_table.lookup(key);
     }

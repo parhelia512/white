@@ -9,6 +9,7 @@ struct WirBinding(
     source_type: Int,
     address: WirValueID,
     is_const: Bool,
+    is_const_access: Bool,
     owns_value: Bool,
     pending_init: Bool,
     is_reference: Bool

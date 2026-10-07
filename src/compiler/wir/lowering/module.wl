@@ -15,7 +15,7 @@ import select_target from "../../target.wl"
 import register_extern_library from "../../validation.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
-import GLOBAL_ERROR_COUNT, throw_extern_error from "../../../frontend/diagnostics.wl"
+import GLOBAL_ERROR_COUNT, throw_overflow_error, throw_extern_error from "../../../frontend/diagnostics.wl"
 
 
 struct WirLoweringResult(
@@ -67,6 +67,14 @@ func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> FuncInfo {
 }
 
 func wir_declare_extern(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ExternFuncNode) -> Void {
+    if (node.abi_name != "C" && node.abi_name != "system") {
+        throw_extern_error(node.pos, "Unsupported extern ABI '" + node.abi_name + "'. Expected 'C' or 'system'.");
+        return;
+    }
+    if (node.is_varargs && node.abi_name != "C") {
+        throw_extern_error(node.pos, "Variadic extern functions require the C ABI.");
+        return;
+    }
     register_extern_library(ref source, node.link_name, node.pos);
     let param_index: Int = 0;
     while (node.params is !null && param_index < node.params.length()) {
@@ -113,7 +121,7 @@ func wir_register_enum(ref types: WirTypeMap, ref source: Compiler, node: EnumDe
         let field: EnumFieldNode = node.fields[i];
         if (has_node(field.value)) { value = eval_const_long(ref source, field.value, field.pos); }
         if (value < -2147483648L || value > 2147483647L) {
-            types.errors.append("Enum member '" + name + "." + field.name_tok.value + "' is outside the Int range");
+            throw_overflow_error(field.pos, "Value for '" + field.name_tok.value + "' is outside the Int range");
             return;
         }
         types.enum_values.put(name + "." + field.name_tok.value, WirEnumValue(source_type=info.type_id, value=value));

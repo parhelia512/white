@@ -66,11 +66,17 @@ func init_without(initialized: Vector(String), removed: Vector(String)) -> Vecto
 }
 
 func local_init_key(node: VarDeclareNode) -> String {
-    return "" + node.alloc_id;
+// initialization runs before alloca numbering, source location keeps shadowed names apart
+    return node.pos.fn + ":" + node.pos.ln + ":" + node.pos.col + ":" + node.name_tok.value;
 }
 
 func bind_local_init(ref scope: LocalInitScope, node: VarDeclareNode) -> Void {
-    scope.table.put(node.name_tok.value, SymbolInfo(reg="", type=node.alloc_id + 1, origin_type=0, is_const=node.is_const));
+    if (scope.table.contains_key(node.name_tok.value)) {
+        throw_name_error(node.pos, "Variable '" + node.name_tok.value + "' is already declared in this scope");
+        return;
+    }
+
+    scope.table.put(node.name_tok.value, SymbolInfo(reg=local_init_key(node), type=1, origin_type=0, is_const=node.is_const));
     scope.declarations.append(node);
 }
 
@@ -79,10 +85,7 @@ func lookup_local_init(ref scope: LocalInitScope, name: String) -> String {
     while (current is !nullptr) {
         let info: SymbolInfo = current.table.lookup(name);
         if (has_symbol(info)) {
-            if (info.type <= 0) {
-                return "";
-            }
-            return "" + (info.type - 1);
+            return info.reg;
         }
         current = current.parent;
     }

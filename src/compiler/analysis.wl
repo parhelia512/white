@@ -4,7 +4,7 @@ import * from "../frontend/arena.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "context.wl"
 import * from "validation.wl"
-import check_class_initialization from "initialization.wl"
+import check_class_initialization, check_local_init, must_terminate from "initialization.wl"
 
 
 struct TypeAnalysisTarget(
@@ -336,6 +336,61 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
     return validate_class_interfaces(ref c, info, node.pos);
 }
 
+func analyze_body_flow(ref c: Compiler, body: NodeID, result_node: NodeID, pos: Position) -> Void {
+// definite initialization and return flow are frontend rules, every backend uses them
+    if (!has_node(body)) {
+        return;
+    }
+
+    check_local_init(ref c, body);
+
+    let result_type: Int = resolve_type(ref c, result_node);
+    let implicit_void_success: Bool = is_fallible_type(ref c, result_type) &&
+                                      get_inner_fallible_type(ref c, result_type) == TYPE_VOID;
+    if (result_type != TYPE_VOID && result_type != TYPE_POISON &&
+        !implicit_void_success && !must_terminate(ref c, body)) {
+        throw_type_error(pos, "Missing return. ");
+    }
+}
+
+func analyze_function_bodies(ref c: Compiler) -> Void {
+    let module_index: Int = 0;
+    while (module_index < c.all_modules.length()) {
+        let module: ParsedModule = c.all_modules[module_index];
+        set_module_context(ref c, module);
+
+        let root: BlockNode = get_block_node(ref c.arena, module.ast);
+        let i: Int = 0;
+        while (root.stmts is !null && i < root.stmts.length()) {
+            let node: NodeID = root.stmts[i];
+            let kind: Int = node_tag(node);
+
+            if (kind == NODE_FUNC_DEF) {
+                let function: FunctionDefNode = get_func_def_node(ref c.arena, node);
+                if (function.type_params is null || function.type_params.length() == 0) {
+                    analyze_body_flow(ref c, function.body, function.ret_type_tok, function.pos);
+                }
+            } else if (kind == NODE_CLASS_DEF) {
+                let class_node: ClassDefNode = get_class_def_node(ref c.arena, node);
+                if (class_node.type_params is !null && class_node.type_params.length() != 0) {
+                    i++;
+                    continue;
+                }
+                let method_index: Int = 0;
+                while (class_node.methods is !null && method_index < class_node.methods.length()) {
+                    let method_node: MethodDefNode = get_method_def_node(ref c.arena, class_node.methods[method_index]);
+                    if (method_node.type_params is null || method_node.type_params.length() == 0) {
+                        analyze_body_flow(ref c, method_node.body, method_node.return_type, method_node.pos);
+                    }
+                    method_index++;
+                }
+            }
+            i++;
+        }
+        module_index++;
+    }
+}
+
 func analyze_declarations(ref c: Compiler) -> Void {
     let struct_targets: Vector(TypeAnalysisTarget) = [];
     let class_targets: Vector(TypeAnalysisTarget) = [];
@@ -385,4 +440,5 @@ func analyze_declarations(ref c: Compiler) -> Void {
         }
         i++;
     }
+    analyze_function_bodies(ref c);
 }

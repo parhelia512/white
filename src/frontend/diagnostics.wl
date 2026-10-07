@@ -311,6 +311,9 @@ func report_error(pos: Position, name: String, details: String) -> Void {
     if (COLLECT_ERRORS_ONLY && GLOBAL_ERROR_COUNT >= 50) {
         return;
     }
+    if (pos.fn is null) { pos.fn = ""; }
+    if (pos.text is null) { pos.text = ""; }
+
     let error_key: String = pos.fn + ":" + pos.ln + ":" + pos.col + ":" + name + ":" + details;
     if (REPORTED_ERRORS is null) { REPORTED_ERRORS = Dict(); }
     if (REPORTED_ERRORS.contains_key(error_key)) { return; }

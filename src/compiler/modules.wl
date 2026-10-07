@@ -110,6 +110,97 @@ func bind_module_prelude(ref c: Compiler, pos: Position) -> Void {
     bind_loaded_prelude(ref c, "dict", pos);
 }
 
+func bind_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
+// imports are rebound from the module snapshot before checking or lowering it
+    set_module_context(ref c, module);
+
+    let imports: Vector(NodeID) = module.imports;
+    let i: Int = 0;
+    while (imports is !null && i < imports.length()) {
+        let node: ImportNode = get_import_node(ref c.arena, imports[i]);
+        if (node.symbols is !null) {
+            let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
+            if (final_path is !null && final_path.length() > 0) {
+                let loaded: StringConstant = c.imported_modules.lookup(final_path);
+                if (has_string_constant(loaded)) {
+                    bind_import_symbols(ref c, node, loaded.value, true, false);
+                    let module_name: String = node.path_tok.value;
+                    let end: Int = module_name.length();
+                    if (module_name.ends_with(".wl")) { end -= 3; }
+                    let start: Int = end - 1;
+                    while (start >= 0 && module_name[start] != '/' && module_name[start] != '\\') { start--; }
+                    unbind_namespace(ref c, module_name.slice(start + 1, end));
+                }
+            }
+        }
+        i++;
+    }
+}
+
+func validate_module_imports(ref c: Compiler, module: ParsedModule) -> Void {
+// replay imports in an empty file scope, module snapshots already contain the final bindings
+    set_module_context(ref c, module);
+
+    let saved_visible: Dict(String, String) = c.current_file_visible_prefixes;
+    let saved_namespaces: Dict(String, Bool) = c.current_file_namespaces;
+    let saved_types: Dict(String, String) = c.current_file_type_aliases;
+    let saved_funcs: Dict(String, String) = c.current_file_func_aliases;
+    let saved_globals: Dict(String, String) = c.current_file_global_aliases;
+
+    c.current_file_visible_prefixes = Dict();
+    c.current_file_namespaces = Dict();
+    c.current_file_type_aliases = Dict();
+    c.current_file_func_aliases = Dict();
+    c.current_file_global_aliases = Dict();
+
+    let imports: Vector(NodeID) = module.imports;
+    let i: Int = 0;
+    while (imports is !null && i < imports.length()) {
+        let node: ImportNode = get_import_node(ref c.arena, imports[i]);
+        let final_path: String = resolve_import_path(ref c, node.path_tok.value, node.pos);
+
+        if (final_path is !null && final_path.length() > 0) {
+            let loaded: StringConstant = c.imported_modules.lookup(final_path);
+            if (has_string_constant(loaded)) {
+                let raw_path: String = node.path_tok.value;
+                let end: Int = raw_path.length();
+                if (raw_path.ends_with(".wl")) { end -= 3; }
+
+                let start: Int = end - 1;
+                while (start >= 0 && raw_path[start] != '/' && raw_path[start] != '\\') {
+                    start--;
+                }
+
+                let module_name: String = raw_path.slice(start + 1, end);
+                if (node.alias_tok.value is !null) {
+                    module_name = node.alias_tok.value;
+                }
+
+                if (node.symbols is null) {
+                    let old_prefix: String = c.current_file_visible_prefixes.lookup(module_name);
+                    if (old_prefix is !null && old_prefix != loaded.value) {
+                        throw_import_error(node.pos, "Module name '" + module_name + "' is already bound to another module.");
+                    } else {
+                        c.current_file_visible_prefixes.put(module_name, loaded.value);
+                    }
+                } else {
+                    unbind_namespace(ref c, module_name);
+                    bind_import_symbols(ref c, node, loaded.value, true, false);
+                }
+            }
+        }
+        i++;
+    }
+
+    bind_module_prelude(ref c, Position(idx=0, ln=0, col=0, text="", fn=module.path));
+
+    c.current_file_visible_prefixes = saved_visible;
+    c.current_file_namespaces = saved_namespaces;
+    c.current_file_type_aliases = saved_types;
+    c.current_file_func_aliases = saved_funcs;
+    c.current_file_global_aliases = saved_globals;
+}
+
 func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let raw_path: String = node.path_tok.value;
     let final_path: String = resolve_import_path(ref c, raw_path, node.pos);
@@ -137,6 +228,10 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let module_name: String = canonical_name;
     if (node.alias_tok.value is !null) { module_name = node.alias_tok.value; }
 
+    if (node.symbols is !null) {
+        unbind_namespace(ref c, module_name);
+    }
+
     let loaded_module: StringConstant = c.imported_modules.lookup(final_path);
     let import_prefix: String = "";
     if (has_string_constant(loaded_module)) {
@@ -159,6 +254,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     if (has_string_constant(loaded_module)) {
         if (node.symbols is !null) {
             bind_import_symbols(ref c, node, import_prefix, true, false);
+            unbind_namespace(ref c, module_name);
             let s_len: Int = node.symbols.length();
             let i: Int = 0;
             let is_star: Bool = false;

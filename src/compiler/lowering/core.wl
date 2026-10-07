@@ -36,31 +36,12 @@ func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
 // enum bodies go first because later declarations may use their members as constants
     set_module_context(ref c, p_mod);
 
-    let imports: Vector(NodeID) = p_mod.imports;
-    let i_len: Int = 0;
-    if (imports is !null) { i_len = imports.length(); }
-    let i: Int = 0;
-    while (i < i_len) {
-        let imp: ImportNode = get_import_node(ref c.arena, imports[i]);
-        if (imp.symbols is !null) {
-            let raw_path: String = imp.path_tok.value;
-            let final_path: String = resolve_import_path(ref c, raw_path, imp.pos);
-            if (final_path is !null && final_path.length() > 0) {
-                let loaded_module: StringConstant = c.imported_modules.lookup(final_path);
-                if (has_string_constant(loaded_module)) {
-                    bind_import_symbols(ref c, imp, loaded_module.value, true, false);
-                }
-            }
-        }
-        i += 1;
-    }
-
     let block: BlockNode = get_block_node(ref c.arena, p_mod.ast);
     let stmts: Vector(NodeID) = block.stmts;
     let len: Int = 0;
     if (stmts is !null) { len = stmts.length(); }
 
-    i = 0;
+    let i: Int = 0;
     while (i < len) {
         let base: Int = node_tag(stmts[i]);
         if (base == NODE_ENUM_DEF) {

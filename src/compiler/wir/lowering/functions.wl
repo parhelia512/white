@@ -13,14 +13,15 @@ import * from "dictionary_runtime.wl"
 import * from "closure_environment.wl"
 import * from "../../context.wl"
 import find_interface_implementation from "../../analysis.wl"
-import parse_const_uint128, parse_decimal_float_literal from "../../constants.wl"
+import parse_const_uint128, parse_decimal_float_literal, eval_const_long from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
-import is_typed_dict from "../../lowering/dictionary.wl"
+import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
+import validate_explicit_literal_cast from "../../lowering/casts.wl"
 import target_intrinsic_symbol, target_value, fold_target_cond from "../../target_eval.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 import * from "../../../frontend/tokens.wl"
-import Position, throw_type_error, throw_invalid_syntax from "../../../frontend/diagnostics.wl"
+import Position, no_position, throw_name_error, throw_type_error, throw_invalid_syntax, throw_overflow_error from "../../../frontend/diagnostics.wl"
 
 
 struct WirMemberCall(
@@ -48,6 +49,19 @@ struct WirPrintSource(
     element_type: Int
 )
 
+func wir_check_fallible_call(ref source: Compiler, call: CallNode, return_type: Int, name: String) -> Bool {
+    if (!is_fallible_type(ref source, return_type) || call.preserve_fallible) {
+        return true;
+    }
+
+    let message: String = "fallible call requires '?'";
+    if (name is !null && name.length() > 0) {
+        message = "call to fallible function '" + name + "' requires '?'";
+    }
+    throw_type_error(call.pos, message);
+    return false;
+}
+
 func wir_find_binding(ref state: WirFunctionLowering, name: String) -> WirBinding? {
     let i: Int = state.bindings.length() - 1;
     while (i >= 0) {
@@ -73,6 +87,58 @@ func wir_has_local_binding(ref state: WirFunctionLowering, name: String) -> Bool
     return true;
 }
 
+func wir_module_symbol(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> String {
+    if (!has_node(node) || node_tag(node) != NODE_FIELD_ACCESS) {
+        return "";
+    }
+
+    let path: String = format_ast_path(ref source, node);
+    let dot: Int = 0;
+    while (dot < path.length() && path[dot] != '.') { dot++; }
+    if (dot <= 0 || dot >= path.length()) { return ""; }
+
+    let root: String = path.slice(0, dot);
+    if (wir_has_local_binding(ref state, root) || source.current_file_visible_prefixes is null) {
+        return "";
+    }
+    let prefix: String = source.current_file_visible_prefixes.lookup(root);
+    if (prefix is null) { return ""; }
+
+    return prefix + path.slice(dot + 1, path.length());
+}
+
+func wir_path_root(ref source: Compiler, node: NodeID) -> String {
+    while (has_node(node) && node_tag(node) == NODE_FIELD_ACCESS) {
+        node = get_field_access_node(ref source.arena, node).obj;
+    }
+    if (has_node(node) && node_tag(node) == NODE_VAR_ACCESS) {
+        return get_var_access_node(ref source.arena, node).name_tok.value;
+    }
+    return "";
+}
+
+func wir_unknown_path_root(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> String {
+    let root: String = wir_path_root(ref source, node);
+    if (root.length() == 0 || wir_has_local_binding(ref state, root)) { return ""; }
+    if (source.current_file_visible_prefixes is !null && source.current_file_visible_prefixes.lookup(root) is !null) { return ""; }
+    if (source.current_file_type_aliases is !null && source.current_file_type_aliases.lookup(root) is !null) { return ""; }
+    if (source.struct_table is !null) {
+        if (has_struct(source.struct_table.lookup(root))) { return ""; }
+        if (source.current_package_prefix is !null && has_struct(source.struct_table.lookup(source.current_package_prefix + root))) { return ""; }
+    }
+    if (has_wir_source_global(wir_source_global(ref source, root)) || has_func(wir_source_function(ref source, root))) { return ""; }
+    return root;
+}
+
+func wir_unknown_call_root(ref state: WirFunctionLowering, ref source: Compiler, node: NodeID) -> String {
+// type names are handled as constructors before this check, a remaining dotted call needs a value or namespace
+    let root: String = wir_path_root(ref source, node);
+    if (root.length() == 0 || wir_has_local_binding(ref state, root)) { return ""; }
+    if (source.current_file_visible_prefixes is !null && source.current_file_visible_prefixes.lookup(root) is !null) { return ""; }
+    if (has_wir_source_global(wir_source_global(ref source, root)) || has_func(wir_source_function(ref source, root))) { return ""; }
+    return root;
+}
+
 func wir_source_function(ref source: Compiler, name: String) -> FuncInfo {
     if (source.func_table is null) {
         return FuncInfo();
@@ -82,7 +148,7 @@ func wir_source_function(ref source: Compiler, name: String) -> FuncInfo {
         let mapped: String = source.current_file_func_aliases.lookup(name);
         if (mapped is !null) { info = source.func_table.lookup(mapped); }
     }
-    if (!has_func(info) && source.current_package_prefix.length() != 0) {
+    if (!has_func(info) && source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
         info = source.func_table.lookup(source.current_package_prefix + name);
     }
     if (!has_func(info) && source.global_func_aliases is !null) {
@@ -124,7 +190,9 @@ func wir_direct_function(ref state: WirFunctionLowering, ref source: Compiler, c
         let name: String = "";
         if (source.current_file_visible_prefixes is !null) {
             let prefix: String = source.current_file_visible_prefixes.lookup(root);
-            if (prefix is !null) { name = module_member_name(prefix, path, access.field_name); }
+            if (prefix is !null && !access.field_name.starts_with("__")) {
+                name = module_member_name(prefix, path, access.field_name);
+            }
         }
         if (name.length() == 0 && source.current_file_func_aliases is !null) {
             let source_name: String = module_member_name(root + ".", path, access.field_name);
@@ -136,7 +204,7 @@ func wir_direct_function(ref state: WirFunctionLowering, ref source: Compiler, c
             if (has_func(info)) { return info; }
         }
     }
-    return wir_source_function(ref source, format_ast_path(ref source, callee));
+    return FuncInfo();
 }
 
 func wir_generic_call_function(ref state: WirFunctionLowering, ref source: Compiler, call: CallNode) -> FuncInfo {
@@ -264,7 +332,12 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
         }
         if (binary.op_tok.type == TOK_POW) { return TYPE_FLOAT; }
         if (get_repr_type(ref source, left_type) == TYPE_STRING || get_repr_type(ref source, right_type) == TYPE_STRING) {
-            if (binary.op_tok.type == TOK_PLUS) { return TYPE_STRING; }
+            if (binary.op_tok.type == TOK_PLUS) {
+                if (left_type == right_type && has_named_type(get_named_type(ref source, left_type))) {
+                    return left_type;
+                }
+                return TYPE_STRING;
+            }
             return TYPE_POISON;
         }
         return wir_binary_type(ref state, ref source, WirExpr(value=NO_WIR_VALUE, source_type=left_type), WirExpr(value=NO_WIR_VALUE, source_type=right_type), binary.left, binary.right);
@@ -285,16 +358,24 @@ func wir_argument_type(ref state: WirFunctionLowering, ref source: Compiler, nod
             let owner: StructInfo = StructInfo();
             if (source.struct_id_map is !null) { owner = source.struct_id_map.lookup("" + owner_type); }
             if (has_struct(owner) && owner.is_class) {
+                let target: FuncInfo = FuncInfo();
                 let method_index: Int = 0;
                 while (owner.vtable is !null && method_index < owner.vtable.length()) {
                     let method_info: FuncInfo = owner.vtable[method_index];
                     if (method_info.base_name == access.field_name) {
-                        if (call.preserve_fallible || !is_fallible_type(ref source, method_info.ret_type)) {
-                            return method_info.ret_type;
-                        }
-                        return get_inner_fallible_type(ref source, method_info.ret_type);
+                        target = method_info;
+                        break;
                     }
                     method_index++;
+                }
+                if (!has_func(target) && source.func_table is !null) {
+                    target = source.func_table.lookup(owner.name + "_" + access.field_name);
+                }
+                if (has_func(target)) {
+                    if (call.preserve_fallible || !is_fallible_type(ref source, target.ret_type)) {
+                        return target.ret_type;
+                    }
+                    return get_inner_fallible_type(ref source, target.ret_type);
                 }
             }
         }
@@ -351,7 +432,9 @@ func wir_member_global(ref state: WirFunctionLowering, ref source: Compiler, obj
             let name: String = "";
             if (source.current_file_visible_prefixes is !null) {
                 let prefix: String = source.current_file_visible_prefixes.lookup(root);
-                if (prefix is !null) { name = module_member_name(prefix, path, field_name); }
+                if (prefix is !null && path.length() == 0 && !field_name.starts_with("__")) {
+                    name = prefix + field_name;
+                }
             }
             if (name.length() != 0) {
                 let global: WirSourceGlobal = wir_source_global(ref source, name);
@@ -384,7 +467,7 @@ func wir_direct_global(ref state: WirFunctionLowering, ref source: Compiler, nod
     let access: FieldAccessNode = get_field_access_node(ref source.arena, node);
     let global: WirSourceGlobal = wir_member_global(ref state, ref source, access.obj, access.field_name);
     if (has_wir_source_global(global)) { return global; }
-    return wir_source_global(ref source, format_ast_path(ref source, node));
+    return no_wir_source_global();
 }
 
 func wir_cast_target(ref source: Compiler, callee: NodeID) -> Int {
@@ -797,6 +880,10 @@ func wir_lower_throw(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
     if (value.value == NO_WIR_VALUE) {
         return;
     }
+    if (value.source_type != TYPE_ANY_ERROR && !is_error_type(ref source, get_repr_type(ref source, value.source_type))) {
+        throw_type_error(node.pos, "Cannot throw " + get_type_name(ref source, value.source_type) + ", expected an error value");
+        return;
+    }
     let error_value: WirValueID = wir_error_value(ref state, ref types, ref source, ref program, value);
     if (error_value == NO_WIR_VALUE) {
         return;
@@ -833,12 +920,32 @@ func wir_route_error(ref state: WirFunctionLowering, ref types: WirTypeMap, ref 
 }
 
 func wir_lower_try_unwrap(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: TryUnwrapNode) -> WirExpr {
-    let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, node.expr);
+    let value: WirExpr = wir_no_expr();
+    if (has_node(node.expr) && node_tag(node.expr) == NODE_INDEX_ACCESS) {
+        value = wir_lower_index_expr(ref state, ref types, ref source, ref program, get_index_access_node(ref source.arena, node.expr), true);
+    } else {
+        value = wir_lower_expr(ref state, ref types, ref source, ref program, node.expr);
+    }
     if (value.value == NO_WIR_VALUE) {
         return wir_no_expr();
     }
     if (!is_fallible_type(ref source, value.source_type)) {
-        state.errors.append("try unwrap reached WIR lowering with a non-fallible value");
+        let target_name: String = "";
+        if (has_node(node.expr) && node_tag(node.expr) == NODE_CALL) {
+            let call: CallNode = get_call_node(ref source.arena, node.expr);
+            if (has_node(call.callee) && node_tag(call.callee) == NODE_VAR_ACCESS) {
+                let callee: VarAccessNode = get_var_access_node(ref source.arena, call.callee);
+                let target_type: Int = get_cast_target(ref source, callee.name_tok.value);
+                if (target_type != 0) {
+                    target_name = get_type_name(ref source, target_type);
+                }
+            }
+        }
+        if (target_name.length() != 0) {
+            throw_invalid_syntax(node.pos, "Conversion to " + target_name + " cannot fail; remove '?'");
+        } else {
+            throw_invalid_syntax(node.pos, "Cannot use '?' on a non-fallible type.");
+        }
         return wir_no_expr();
     }
 
@@ -1647,6 +1754,10 @@ func wir_alloc_callable(
 }
 
 func wir_lower_function_value(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, info: FuncInfo) -> WirExpr {
+    if (info.is_varargs) {
+        throw_type_error(no_position(), "A C variadic function cannot be used as a White Language Function value.");
+        return wir_no_expr();
+    }
     let function_id: WirFuncID = wir_find_function(program, info.name);
     if (function_id == NO_WIR_FUNC) {
         function_id = wir_lower_function_decl(ref types, ref source, ref program, info);
@@ -1698,7 +1809,7 @@ func wir_bind_class_method(
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
     if (wir_lvalue_const(ref state, ref source, access.obj)) {
-        state.errors.append("Method '" + access.field_name + "' cannot be bound through a const value");
+        throw_type_error(access.pos, "Cannot bind a method through const value");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
 
@@ -1745,7 +1856,7 @@ func wir_bind_interface_method(
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
     if (wir_lvalue_const(ref state, ref source, access.obj)) {
-        state.errors.append("Method '" + access.field_name + "' cannot be bound through a const value");
+        throw_type_error(access.pos, "Cannot bind a method through const value");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
 
@@ -1829,7 +1940,7 @@ func wir_lower_generic_method_value(
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
     if (wir_lvalue_const(ref state, ref source, access.obj) && target.mutates_self) {
-        state.errors.append("Mutating method '" + access.field_name + "' cannot be bound through a const value");
+        throw_type_error(access.pos, "Cannot bind a method through const value");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
 
@@ -2274,6 +2385,10 @@ func wir_cast_expr(
         return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
     }
     if (source_kind == WirTypeKind.BoolType && target_integer) {
+        if implicit {
+            throw_type_error(no_position(), "Type mismatch. Expected " + get_type_name(ref source, target_type) + ", got Bool");
+            return wir_no_expr();
+        }
         return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
     }
     if (source_integer && target_kind == WirTypeKind.BoolType) {
@@ -2421,11 +2536,18 @@ func wir_enum_member(ref types: WirTypeMap, ref source: Compiler, node_id: NodeI
             if (mapped_value.source_type != 0) { return mapped_value; }
         }
     }
-    let value: WirEnumValue = wir_enum_value(ref types, ref source, source.current_package_prefix + owner, node.field_name);
-    if (value.source_type != 0) { return value; }
+    let value: WirEnumValue = WirEnumValue();
+    if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
+        value = wir_enum_value(ref types, ref source, source.current_package_prefix + owner, node.field_name);
+        if (value.source_type != 0) { return value; }
+    }
 
-    value = wir_enum_value(ref types, ref source, owner, node.field_name);
-    if (value.source_type != 0) { return value; }
+    let owner_dot: Int = 0;
+    while (owner_dot < owner.length() && owner[owner_dot] != '.') { owner_dot++; }
+    if (owner_dot >= owner.length()) {
+        value = wir_enum_value(ref types, ref source, owner, node.field_name);
+        if (value.source_type != 0) { return value; }
+    }
 
     let separator: Int = 0;
     while (separator < owner.length() && owner[separator] != '.') { separator++; }
@@ -2473,7 +2595,7 @@ func wir_lvalue_const(ref state: WirFunctionLowering, ref source: Compiler, node
             let global: WirSourceGlobal = wir_source_global(ref source, access.name_tok.value);
             return has_wir_source_global(global) && global.is_const;
         }
-        return binding.is_const;
+        return binding.is_const || binding.is_const_access;
     }
     if (kind == NODE_FIELD_ACCESS) {
         let access: FieldAccessNode = get_field_access_node(ref source.arena, node);
@@ -2634,7 +2756,7 @@ func wir_lower_index_lvalue(
     return wir_no_expr();
 }
 
-func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, access: IndexAccessNode) -> WirExpr {
+func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, access: IndexAccessNode, preserve_fallible: Bool) -> WirExpr {
     let target_type: Int = get_repr_type(ref source, wir_lvalue_type(ref state, ref source, access.target));
     let owner: StructInfo = source.struct_id_map.lookup("" + target_type);
     if (has_struct(owner) && owner.is_class) {
@@ -2651,7 +2773,7 @@ func wir_lower_index_expr(ref state: WirFunctionLowering, ref types: WirTypeMap,
         if has_get {
             let callee: NodeID = add_field_access_node(ref source.arena, FieldAccessNode(type=NODE_FIELD_ACCESS, obj=access.target, field_name="get", pos=access.pos));
             let arguments: Vector(ArgNode) = [ArgNode(val=access.index_node, name=null)];
-            let call: CallNode = CallNode(type=NODE_CALL, callee=callee, args=arguments, type_args=null, pos=access.pos, preserve_fallible=false);
+            let call: CallNode = CallNode(type=NODE_CALL, callee=callee, args=arguments, type_args=null, pos=access.pos, preserve_fallible=preserve_fallible);
             let result: WirMemberCall = wir_lower_class_call(ref state, ref types, ref source, ref program, call);
             if (result.handled) { return result.value; }
         }
@@ -2701,7 +2823,7 @@ func wir_lower_lvalue(ref state: WirFunctionLowering, ref types: WirTypeMap, ref
             let global_id: WirGlobalID = NO_WIR_GLOBAL;
             if (has_wir_source_global(global)) { global_id = wir_find_global(program, global.name); }
             if (global_id == NO_WIR_GLOBAL) {
-                state.errors.append("unknown value '" + access.name_tok.value + "' in WIR lvalue lowering");
+                throw_name_error(access.pos, "Undefined variable or function '" + access.name_tok.value + "'.");
                 return wir_no_expr();
             }
             return WirExpr(value=wir_global_value(ref program, global_id), source_type=global.source_type);
@@ -2777,7 +2899,10 @@ func wir_struct_constructor(ref source: Compiler, node: NodeID) -> StructInfo {
         return StructInfo();
     }
     let name: String = format_ast_path(ref source, node);
-    let info: StructInfo = source.struct_table.lookup(source.current_package_prefix + name);
+    let info: StructInfo = StructInfo();
+    if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
+        info = source.struct_table.lookup(source.current_package_prefix + name);
+    }
     if (!has_struct(info)) { info = source.struct_table.lookup(name); }
     if (!has_struct(info) && source.current_file_type_aliases is !null) {
         let mapped: String = source.current_file_type_aliases.lookup(name);
@@ -2820,7 +2945,10 @@ func wir_generic_constructor(ref source: Compiler, node: NodeID) -> GenericTempl
     }
 
     let name: String = format_ast_path(ref source, node);
-    let generic: GenericTemplate = source.generic_structs.lookup(source.current_package_prefix + name);
+    let generic: GenericTemplate = GenericTemplate();
+    if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
+        generic = source.generic_structs.lookup(source.current_package_prefix + name);
+    }
     if (!has_template(generic)) { generic = source.generic_structs.lookup(name); }
     if (!has_template(generic) && source.current_file_type_aliases is !null) {
         let mapped: String = source.current_file_type_aliases.lookup(name);
@@ -3815,7 +3943,7 @@ func wir_lower_slice_access(ref state: WirFunctionLowering, ref types: WirTypeMa
     if (target_type == TYPE_STRING) {
         if shared {
             if (!omitted) {
-                state.errors.append("shared String slices require omitted bounds during WIR lowering");
+                throw_type_error(node.pos, "String views currently require a full slice expression.");
                 return wir_no_expr();
             }
             return target;
@@ -4169,6 +4297,21 @@ func wir_lower_interface_value(ref state: WirFunctionLowering, ref types: WirTyp
     if (!has_struct(class_info) || !class_info.is_class || !has_struct(interface_info) || !interface_info.is_interface) {
         return wir_no_expr();
     }
+    let method_index: Int = 0;
+    while (interface_info.vtable is !null && method_index < interface_info.vtable.length()) {
+        let method_def: MethodDefNode = interface_info.vtable[method_index];
+        let uses_self: Bool = type_node_contains_self(source.arena, method_def.return_type);
+        let param_index: Int = 0;
+        while (!uses_self && method_def.params is !null && param_index < method_def.params.length()) {
+            uses_self = type_node_contains_self(source.arena, method_def.params[param_index].type_tok);
+            param_index++;
+        }
+        if uses_self {
+            throw_type_error(no_position(), "Interface '" + interface_diagnostic_name(ref source, interface_info.type_id) + "' uses Self and can only be used as a static constraint.");
+            return wir_no_expr();
+        }
+        method_index++;
+    }
     if (!class_has_interface(ref source, class_info, interface_info)) {
         let declared: String = "";
         let i: Int = 0;
@@ -4178,14 +4321,14 @@ func wir_lower_interface_value(ref state: WirFunctionLowering, ref types: WirTyp
             declared += "" + item.type;
             i++;
         }
-        state.errors.append("Class '" + class_info.name + "' does not implement interface '" + interface_info.name + "' during WIR lowering (declared: " + declared + ")");
+        throw_type_error(no_position(), "Class '" + class_info.name + "' does not implement interface '" + interface_info.name + "'.");
         return wir_no_expr();
     }
     let table_id: WirGlobalID = wir_find_global(program, wir_interface_table_name(class_info, interface_info));
     if (table_id == NO_WIR_GLOBAL) {
         let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
         let entries: Vector(WirValueID) = [];
-        let method_index: Int = 0;
+        method_index = 0;
         while (interface_info.vtable is !null && method_index < interface_info.vtable.length()) {
             let required: MethodDefNode = interface_info.vtable[method_index];
             let implementation: FuncInfo = find_interface_implementation(ref source, class_info, interface_info, required);
@@ -4312,6 +4455,9 @@ func wir_lower_string_call(
     let target: FuncInfo = wir_compiler_link_function(ref source, "string_" + access.field_name);
     if (!has_func(target)) {
         return WirMemberCall(handled=false, value=wir_no_expr());
+    }
+    if (!wir_check_fallible_call(ref source, call, target.ret_type, access.field_name)) {
+        return WirMemberCall(handled=true, value=wir_no_expr());
     }
     let argument_count: Int = 0;
     if (call.args is !null) { argument_count = call.args.length(); }
@@ -4842,11 +4988,14 @@ func wir_lower_class_call(ref state: WirFunctionLowering, ref types: WirTypeMap,
     if (!has_func(target)) {
         return WirMemberCall(handled=false, value=wir_no_expr());
     }
+    if (!wir_check_fallible_call(ref source, call, target.ret_type, access.field_name)) {
+        return WirMemberCall(handled=true, value=wir_no_expr());
+    }
     if (target.compiler_link_name is !null && target.compiler_link_name.length() != 0) {
         return wir_lower_linked_class_call(ref state, ref types, ref source, ref program, call, owner, target);
     }
     if (wir_lvalue_const(ref state, ref source, access.obj) && target.mutates_self) {
-        state.errors.append("Mutating method '" + access.field_name + "' reached WIR lowering through a const value");
+        throw_type_error(call.pos, "Cannot call mutating method '" + access.field_name + "' through const value");
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
 
@@ -4977,6 +5126,9 @@ func wir_lower_generic_method_call(ref state: WirFunctionLowering, ref types: Wi
         target = register_generic_method(ref source, generic, owner, type_arguments, call.pos);
     }
     if (!has_func(target)) {
+        return WirMemberCall(handled=true, value=wir_no_expr());
+    }
+    if (!wir_check_fallible_call(ref source, call, target.ret_type, access.field_name)) {
         return WirMemberCall(handled=true, value=wir_no_expr());
     }
 
@@ -5459,6 +5611,13 @@ func wir_lower_map_literal(ref state: WirFunctionLowering, ref types: WirTypeMap
     let i: Int = 0;
     while (literal.pairs is !null && i < literal.pairs.length()) {
         let pair: MapPairNode = literal.pairs[i];
+        if (!is_typed_dict(ref source, dict_info)) {
+            let key_type: Int = wir_argument_type(ref state, ref source, pair.key);
+            if (key_type != TYPE_POISON && !is_dict_key_type(ref source, get_repr_type(ref source, key_type))) {
+                throw_type_error(literal.pos, "fatal: Dict key is not hashable");
+                return wir_no_expr();
+            }
+        }
         let arguments: Vector(ArgNode) = [ArgNode(val=pair.key, name=null), ArgNode(val=pair.value, name=null)];
         let call_result: WirExpr = wir_call_class_method_value(ref state, ref types, ref source, ref program, result, dict_info, "put", arguments, literal.pos);
         if (call_result.source_type == TYPE_POISON) {
@@ -5725,7 +5884,7 @@ func wir_binary_type(ref state: WirFunctionLowering, ref source: Compiler, left:
         if (is_signed_integer(right.source_type) && right_bits > left_bits) { return right.source_type; }
         if (is_unsuffix_int_literal(ref source, left_node)) { return right.source_type; }
         if (is_unsuffix_int_literal(ref source, right_node)) { return left.source_type; }
-        state.errors.append("signed and unsigned integers reached WIR lowering without an explicit conversion");
+        throw_type_error(no_position(), "Cannot mix signed and unsigned integers without an explicit conversion");
         return TYPE_POISON;
     }
 
@@ -6348,6 +6507,18 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     if (kind == NODE_TYPE_LAYOUT) {
         let query: TypeLayoutNode = get_type_layout_node(ref source.arena, node);
         let source_type: Int = resolve_type(ref source, query.type_node);
+        if (source_type == TYPE_AUTO) {
+            let operation: String = "size";
+            if (query.is_align) { operation = "alignment"; }
+            throw_type_error(query.pos, "Type 'Auto' must be resolved before its " + operation + " can be determined.");
+            return wir_no_expr();
+        }
+        if (source_type == TYPE_VOID) {
+            let operation: String = "size";
+            if (query.is_align) { operation = "alignment"; }
+            throw_type_error(query.pos, "Type 'Void' has no " + operation + ".");
+            return wir_no_expr();
+        }
         let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
         if (type_id == NO_WIR_TYPE) { return wir_no_expr(); }
         let layout: WirTypeLayout = wir_lowering_layout(ref types, program, type_id);
@@ -6400,6 +6571,16 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             }
             return WirExpr(value=wir_const_int(ref program, type_id, UInt128(enum_member.value)), source_type=enum_member.source_type);
         }
+        let unknown_root: String = wir_unknown_path_root(ref state, ref source, node);
+        if (unknown_root.length() != 0) {
+            throw_name_error(access.pos, "Undefined variable or function '" + unknown_root + "'.");
+            return wir_no_expr();
+        }
+        let enum_owner: StructInfo = wir_struct_constructor(ref source, access.obj);
+        if (has_struct(enum_owner) && enum_owner.is_enum && !has_field(find_field(enum_owner, access.field_name))) {
+            throw_name_error(access.pos, "Enum '" + format_ast_path(ref source, access.obj) + "' has no member '" + access.field_name + "'.");
+            return wir_no_expr();
+        }
         let global: WirSourceGlobal = wir_direct_global(ref state, ref source, node);
         if (has_wir_source_global(global)) {
             let global_id: WirGlobalID = wir_find_global(program, global.name);
@@ -6408,6 +6589,11 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 return wir_no_expr();
             }
             return WirExpr(value=wir_load(ref program, state.block, wir_global_value(ref program, global_id), "", no_wir_location()), source_type=global.source_type);
+        }
+        let module_symbol: String = wir_module_symbol(ref state, ref source, node);
+        if (module_symbol.length() != 0) {
+            throw_name_error(access.pos, "Undefined module variable '" + module_symbol + "'.");
+            return wir_no_expr();
         }
         let bound_method: WirMemberCall = wir_lower_bound_method(ref state, ref types, ref source, ref program, access);
         if (bound_method.handled) { return bound_method.value; }
@@ -6481,7 +6667,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         while (level < dereference.level) {
             let pointer: SymbolInfo = source.ptr_base_map.lookup("" + value.source_type);
             if (!has_symbol(pointer) || pointer.type == TYPE_VOID) {
-                state.errors.append("invalid pointer dereference reached WIR lowering");
+                throw_type_error(dereference.pos, "Attempt to dereference non-pointer.");
                 return wir_no_expr();
             }
             wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [value.value], [], no_wir_location());
@@ -6502,7 +6688,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         return WirExpr(value=wir_binary(ref program, state.block, opcode, program.bool_type, left.value, right.value, "", no_wir_location()), source_type=TYPE_BOOL);
     }
     if (kind == NODE_INDEX_ACCESS) {
-        return wir_lower_index_expr(ref state, ref types, ref source, ref program, get_index_access_node(ref source.arena, node));
+        return wir_lower_index_expr(ref state, ref types, ref source, ref program, get_index_access_node(ref source.arena, node), false);
     }
     if (kind == NODE_SLICE_ACCESS) {
         return wir_lower_slice_access(ref state, ref types, ref source, ref program, get_slice_access_node(ref source.arena, node), false);
@@ -6548,7 +6734,8 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             return wir_no_expr();
         }
         if (wir_lvalue_const(ref state, ref source, postfix.node)) {
-            state.errors.append("const value reached WIR postfix lowering");
+            let name: String = expr_root_name(ref source, postfix.node);
+            throw_type_error(postfix.pos, "Cannot modify constant variable '" + name + "'.");
             return wir_no_expr();
         }
         let address: WirExpr = wir_lower_lvalue(ref state, ref types, ref source, ref program, postfix.node);
@@ -6639,7 +6826,9 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             let left_stringable: Bool = left_repr == TYPE_STRING || left_repr == TYPE_NULL || left_repr == TYPE_NULLPTR || is_primitive_type(left_repr);
             let right_stringable: Bool = right_repr == TYPE_STRING || right_repr == TYPE_NULL || right_repr == TYPE_NULLPTR || is_primitive_type(right_repr);
             if (!left_stringable || !right_stringable) {
-                state.errors.append("String concatenation reached WIR lowering with an unsupported operand");
+                let other_type: Int = right.source_type;
+                if (left_repr != TYPE_STRING) { other_type = left.source_type; }
+                throw_type_error(binary.pos, "Cannot concatenate String and " + get_type_name(ref source, other_type));
                 return wir_no_expr();
             }
             if (left_repr != TYPE_STRING) {
@@ -6695,7 +6884,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         if (binary.op_tok.type == TOK_POW) {
             if (!wir_source_numeric(left_repr) || !wir_source_numeric(right_repr)) {
-                state.errors.append("Operator '**' reached WIR lowering with non-numeric operands");
+                throw_type_error(binary.pos, "Operator '**' requires numeric operands");
                 return wir_no_expr();
             }
             left = wir_cast_expr(ref state, ref types, ref source, ref program, left, TYPE_FLOAT, false);
@@ -6724,6 +6913,14 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 state.errors.append("binary operands reached WIR lowering with incompatible types");
             }
             return wir_no_expr();
+        }
+        if ((binary.op_tok.type == TOK_LSHIFT || binary.op_tok.type == TOK_RSHIFT) && is_unsuffix_int_literal(ref source, binary.right)) {
+            let bits: Int = get_type_bitwidth(get_repr_type(ref source, common_type));
+            let amount: Long = eval_const_long(ref source, binary.right, binary.pos);
+            if (amount < 0L || amount >= Long(bits)) {
+                throw_overflow_error(binary.pos, "Shift count must be between 0 and " + (bits - 1));
+                return wir_no_expr();
+            }
         }
         left = wir_cast_expr(ref state, ref types, ref source, ref program, left, common_type, false);
         right = wir_cast_expr(ref state, ref types, ref source, ref program, right, common_type, false);
@@ -6781,6 +6978,9 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             let argument: ArgNode = call.args[0];
             if ((argument.name is !null && argument.name.length() != 0) || argument.is_spread) {
                 state.errors.append("named or spread argument reached WIR type conversion");
+                return wir_no_expr();
+            }
+            if (!validate_explicit_literal_cast(ref source, argument.val, cast_target, call.pos)) {
                 return wir_no_expr();
             }
             let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, argument.val);
@@ -6846,6 +7046,9 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         if (has_func(info) && (info.compiler_link_name == "dict_key_hash" || info.compiler_link_name == "dict_keys_equal")) {
             return wir_lower_dict_intrinsic(ref state, ref types, ref source, ref program, call, info);
         }
+        if (has_func(info) && !wir_check_fallible_call(ref source, call, info.ret_type, info.base_name)) {
+            return wir_no_expr();
+        }
         if (has_func(info) && (info.ann_flags & FLAG_ANN_INTRINSIC) != 0) {
             if (info.base_name == "print") {
                 return wir_lower_print_call(ref state, ref types, ref source, ref program, call);
@@ -6897,6 +7100,18 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
                 return wir_lower_class_constructor(ref state, ref types, ref source, ref program, call, constructor);
             }
             return wir_lower_struct_constructor(ref state, ref types, ref source, ref program, call, constructor);
+        }
+        if (!has_func(info)) {
+            let unknown_root: String = wir_unknown_call_root(ref state, ref source, call.callee);
+            if (unknown_root.length() != 0) {
+                throw_name_error(call.pos, "Undefined variable or function '" + unknown_root + "'.");
+                return wir_no_expr();
+            }
+            let module_symbol: String = wir_module_symbol(ref state, ref source, call.callee);
+            if (module_symbol.length() != 0) {
+                throw_name_error(call.pos, "Function '" + module_symbol + "' is not defined.");
+                return wir_no_expr();
+            }
         }
         let callee_value: WirValueID = NO_WIR_VALUE;
         let signature_info: SymbolInfo = SymbolInfo();
@@ -6987,7 +7202,7 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             while (call.args is !null && i < call.args.length()) {
                 let argument: ArgNode = call.args[i];
                 if ((argument.name is !null && argument.name.length() != 0) || argument.is_spread) {
-                    state.errors.append("Named and spread arguments cannot be passed to a C variadic function");
+                    throw_invalid_syntax(call.pos, "Argument expansion is not available when calling a C variadic function.");
                     return wir_no_expr();
                 }
                 let value: WirExpr = wir_no_expr();
@@ -7024,10 +7239,33 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
 }
 
 func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: VarDeclareNode) -> Void {
+    let const_access: Bool = has_node(node.value) && wir_lvalue_const(ref state, ref source, node.value);
     let source_type: Int = TYPE_AUTO;
     if (has_node(node.type_node)) {
         let declared: Int = resolve_type(ref source, node.type_node);
         if (declared != TYPE_AUTO) { source_type = declared; }
+    }
+    if (source_type == TYPE_AUTO && has_node(node.value) && node_tag(node.value) == NODE_CALL) {
+        let call: CallNode = get_call_node(ref source.arena, node.value);
+        let info: FuncInfo = wir_direct_function(ref state, ref source, call.callee);
+        if (!has_func(info)) { info = wir_generic_call_function(ref state, ref source, call); }
+        if (has_func(info) && is_fallible_type(ref source, info.ret_type) && !call.preserve_fallible) {
+            throw_type_error(node.pos, "Fallible values cannot be stored; handle the call with '?'");
+            return;
+        }
+    }
+    if (source_type != TYPE_AUTO && has_node(node.value)) {
+        let expected_named: NamedTypeInfo = get_named_type(ref source, source_type);
+        if (has_named_type(expected_named)) {
+            let actual_type: Int = wir_argument_type(ref state, ref source, node.value);
+            let actual_named: NamedTypeInfo = get_named_type(ref source, actual_type);
+            if (actual_type != TYPE_POISON && actual_type != source_type &&
+                get_repr_type(ref source, actual_type) == get_repr_type(ref source, source_type) &&
+                (has_named_type(expected_named) || has_named_type(actual_named))) {
+                throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(ref source, source_type) + ", got " + get_type_name(ref source, actual_type));
+                return;
+            }
+        }
     }
     let reference_binding: Bool = is_ref_binding_init(ref source, node.value) &&
                                   (source_type == TYPE_AUTO ||
@@ -7070,10 +7308,11 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
             existing.owns_value = false;
             existing.pending_init = false;
             existing.is_reference = true;
+            existing.is_const_access = const_access;
             state.bindings[existing_index] = existing;
             return;
         }
-        state.bindings.append(WirBinding(name=node.name_tok.value, source_type=source_type, address=address.value, is_const=node.is_const, owns_value=false, pending_init=false, is_reference=true));
+        state.bindings.append(WirBinding(name=node.name_tok.value, source_type=source_type, address=address.value, is_const=node.is_const, is_const_access=const_access, owns_value=false, pending_init=false, is_reference=true));
         return;
     }
     let value: WirExpr = wir_no_expr();
@@ -7126,6 +7365,7 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
         wir_emit_ownership_slot(ref state, ref source, ref program, existing.address, source_type, false);
         wir_store(ref program, state.block, value.value, existing.address, no_wir_location());
         existing.pending_init = false;
+        existing.is_const_access = const_access;
         state.bindings[existing_index] = existing;
         return;
     }
@@ -7135,7 +7375,7 @@ func wir_lower_var(ref state: WirFunctionLowering, ref types: WirTypeMap, ref so
     wir_move_or_retain(ref state, ref source, ref program, value);
     wir_store(ref program, state.block, value.value, address, no_wir_location());
     let owns_value: Bool = wir_value_needs_drop(ref source, source_type);
-    state.bindings.append(WirBinding(name=node.name_tok.value, source_type=source_type, address=address, is_const=node.is_const, owns_value=owns_value, pending_init=false));
+    state.bindings.append(WirBinding(name=node.name_tok.value, source_type=source_type, address=address, is_const=node.is_const, is_const_access=const_access, owns_value=owns_value, pending_init=false));
 }
 
 func wir_loop_has_break(ref source: Compiler, node: NodeID) -> Bool {
@@ -7232,6 +7472,16 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         wir_move_or_retain(ref state, ref source, ref program, value);
         wir_emit_ownership_slot(ref state, ref source, ref program, binding.address, binding.source_type, false);
         wir_store(ref program, state.block, value.value, binding.address, no_wir_location());
+
+        let binding_index: Int = state.bindings.length() - 1;
+        while (binding_index >= 0 && state.bindings[binding_index].name != statement.name_tok.value) {
+            binding_index--;
+        }
+        if (binding_index >= 0) {
+            let updated: WirBinding = state.bindings[binding_index];
+            updated.is_const_access = wir_lvalue_const(ref state, ref source, statement.value);
+            state.bindings[binding_index] = updated;
+        }
         return;
     }
     if (kind == NODE_FIELD_ASSIGN) {
@@ -7260,7 +7510,8 @@ func wir_lower_stmt(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
             return;
         }
         if (wir_field_const(ref state, ref source, statement.obj, statement.field_name)) {
-            state.errors.append("const field reached WIR lowering with an assignment");
+            let name: String = expr_root_name(ref source, statement.obj);
+            throw_type_error(statement.pos, "Cannot modify value through const access '" + name + "'");
             return;
         }
         let address: WirExpr = wir_lower_field_lvalue(ref state, ref types, ref source, ref program, statement.obj, statement.field_name);
