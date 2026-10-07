@@ -400,8 +400,9 @@ func main(argc: Int, ptr argv: String) -> Int {
         return 1;
     }
     if (cfg.backend == "machine") {
-        if (WhitelangTarget.get_target_triple() != "x86_64-pc-windows-msvc") {
-            print("Error: The machine backend currently supports only x86_64-pc-windows-msvc.");
+        let machine_target: String = WhitelangTarget.get_target_triple();
+        if (machine_target != "x86_64-pc-windows-msvc" && machine_target != "x86_64-unknown-linux-gnu") {
+            print("Error: The machine backend currently supports x86_64 Windows and Linux targets.");
             return 1;
         }
         if (cfg.is_emit_llvm || cfg.is_asm_only || cfg.dump_ir || cfg.debug_info) {
@@ -481,11 +482,13 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     let machine_file: String = "";
     if (cfg.backend == "machine" && !cfg.is_emit_wir) {
+        let object_suffix: String = ".obj";
+        if (WhitelangTarget.get_target_binary_format() != sys.BinaryFormat.Coff) { object_suffix = ".o"; }
         if (cfg.is_compile_only) { machine_file = cfg.output_file; }
         else if (cfg.keep_temps) {
-            machine_file = base_name + ".obj";
+            machine_file = base_name + object_suffix;
         }
-        else { machine_file = ll_file.slice(0, ll_file.length() - 3) + ".obj"; }
+        else { machine_file = ll_file.slice(0, ll_file.length() - 3) + object_suffix; }
     }
 
     log_stage(cfg, "Frontend & Middle-end");

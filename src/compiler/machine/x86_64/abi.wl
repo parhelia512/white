@@ -2,6 +2,19 @@
 import * from "model.wl"
 import WirTypeLayout from "../../wir/model.wl"
 
+// the backend starts with Win64, but the machine code itself does not depend
+// on the object format. Keep the selected calling convention here so lowering
+// can share the instruction emitter between COFF and ELF.
+let __x86_sysv_abi: Bool = false;
+
+func x86_set_sysv_abi(value: Bool) -> Void {
+    __x86_sysv_abi = value;
+}
+
+func x86_is_sysv_abi() -> Bool {
+    return __x86_sysv_abi;
+}
+
 
 func x86_win64_aggregate_size(layout: WirTypeLayout) -> Int {
 // small POD aggregates use integer registers, even when their fields are floats
@@ -87,4 +100,54 @@ func x86_win64_is_callee_saved(register: X86Register) -> Bool {
     }
 
     return false;
+}
+
+func x86_aggregate_size(layout: WirTypeLayout) -> Int {
+    return x86_win64_aggregate_size(layout);
+}
+
+func x86_argument_register(index: Int, floating: Bool) -> X86Register {
+    if (!__x86_sysv_abi) {
+        return x86_win64_argument_register(index, floating);
+    }
+    if (index < 0) { return X86Register.None; }
+    if (floating) {
+        if (index > 7) { return X86Register.None; }
+        if (index == 0) { return X86Register.XMM0; }
+        if (index == 1) { return X86Register.XMM1; }
+        if (index == 2) { return X86Register.XMM2; }
+        if (index == 3) { return X86Register.XMM3; }
+        if (index == 4) { return X86Register.XMM4; }
+        if (index == 5) { return X86Register.XMM5; }
+        if (index == 6) { return X86Register.XMM6; }
+        return X86Register.XMM7;
+    }
+    if (index > 5) { return X86Register.None; }
+    if (index == 0) { return X86Register.RDI; }
+    if (index == 1) { return X86Register.RSI; }
+    if (index == 2) { return X86Register.RDX; }
+    if (index == 3) { return X86Register.RCX; }
+    if (index == 4) { return X86Register.R8; }
+    return X86Register.R9;
+}
+
+func x86_stack_arg_offset(index: Int) -> Int {
+    if (!__x86_sysv_abi) { return x86_win64_stack_arg_offset(index); }
+    if (index < 6) { return -1; }
+    return (index - 6) * 8;
+}
+
+func x86_stack_param_offset(index: Int) -> Int {
+    if (!__x86_sysv_abi) { return x86_win64_stack_param_offset(index); }
+    if (index < 6) { return -1; }
+    return 16 + (index - 6) * 8;
+}
+
+func x86_call_frame(argument_count: Int) -> Int {
+    if (!__x86_sysv_abi) { return x86_win64_call_frame(argument_count); }
+    let staged: Int = 48;
+    if (argument_count < 6) { staged = argument_count * 8; }
+    let size: Int = staged;
+    if (argument_count > 6) { size += (argument_count - 6) * 8; }
+    return (size + 15) & -16;
 }

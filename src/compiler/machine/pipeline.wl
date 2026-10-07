@@ -8,6 +8,7 @@ import verify_wir from "../wir/verify.wl"
 import X86Object from "x86_64/model.wl"
 import X86ModuleResult, x86_lower_module from "x86_64/lowering.wl"
 import coff_object from "x86_64/coff.wl"
+import elf_object from "x86_64/elf.wl"
 
 
 struct MachinePipelineResult(bytes: Vector(Byte), errors: Vector(String))
@@ -29,7 +30,7 @@ func lower_program_to_machine(
         return MachinePipelineResult(bytes=[], errors=lowered.errors);
     }
 
-    if (target != "x86_64-pc-windows-msvc" || pointer_bits != 64) {
+    if ((target != "x86_64-pc-windows-msvc" && target != "x86_64-unknown-linux-gnu") || pointer_bits != 64) {
         return MachinePipelineResult(bytes=[], errors=["The machine backend does not support target '" + target + "'."]);
     }
 
@@ -67,11 +68,14 @@ func lower_program_to_machine(
     if (machine.errors.length() != 0) {
         return MachinePipelineResult(bytes=[], errors=machine.errors);
     }
-    if verbose {
-        print("Encoding COFF object");
+    let object: Vector(Byte) = [];
+    if (target == "x86_64-unknown-linux-gnu") {
+        if verbose { print("Encoding ELF object"); }
+        object = elf_object(X86Object(sections=machine.sections, symbols=machine.symbols, relocations=machine.relocations))?;
+    } else {
+        if verbose { print("Encoding COFF object"); }
+        object = coff_object(X86Object(sections=machine.sections, symbols=machine.symbols, relocations=machine.relocations))?;
     }
-
-    let object: Vector(Byte) = coff_object(X86Object(sections=machine.sections, symbols=machine.symbols, relocations=machine.relocations))?;
     catch(err) {
         return MachinePipelineResult(bytes=[], errors=["Could not encode the machine object file."]);
     }

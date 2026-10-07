@@ -1,6 +1,7 @@
 // src/compiler/machine/x86_64/memory.wl
 import * from "model.wl"
 import * from "encoder.wl"
+import x86_is_sysv_abi from "abi.wl"
 
 
 func x86_is_memop(name: String) -> Bool {
@@ -13,6 +14,15 @@ func x86_emit_memop(ref output: X86CodeBuffer, name: String) -> Bool {
 // Win64 passes destination, source/value and count in RCX, RDX and R8.
 // These are leaf functions, R9 and R10 are volatile and may be used as scratch.
     if (!x86_is_memop(name)) { return false; }
+
+    // The body below uses the Win64 register names to keep the byte loop small.
+    // Shuffle the three SysV arguments once when this helper is emitted for ELF.
+    if (x86_is_sysv_abi()) {
+        x86_mov_register64(ref output, X86Register.R10, X86Register.RDX);
+        x86_mov_register64(ref output, X86Register.RCX, X86Register.RDI);
+        x86_mov_register64(ref output, X86Register.RDX, X86Register.RSI);
+        x86_mov_register64(ref output, X86Register.R8, X86Register.R10);
+    }
 
     x86_mov_register64(ref output, X86Register.RAX, X86Register.RCX);
     x86_mov_register_imm32(ref output, X86Register.R9, 0U);

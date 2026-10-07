@@ -20,10 +20,8 @@ func rejected(object: X86Object) -> Bool {
 
 func main() -> Int {
     let win32_program: WirModule = new_wir_module("i686-pc-windows-msvc", 32);
-    let linux_program: WirModule = new_wir_module("x86_64-unknown-linux-gnu", 64);
     let win32: X86ModuleResult = x86_lower_module(ref win32_program);
-    let linux: X86ModuleResult = x86_lower_module(ref linux_program);
-    if (win32.errors.length() == 0 || linux.errors.length() == 0) {
+    if (win32.errors.length() == 0) {
         print("FAIL: the Win64 machine backend accepted an incompatible target");
         return 1;
     }
