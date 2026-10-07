@@ -1,5 +1,4 @@
-// compiler/pipeline.wl
-
+// src/compiler/pipeline.wl
 import * from "../frontend/ast.wl"
 import * from "../frontend/tokens.wl"
 import Position, GLOBAL_ERROR_COUNT, throw_import_error from "../frontend/diagnostics.wl"
@@ -8,8 +7,9 @@ import * from "modules.wl"
 import * from "analysis.wl"
 import compile_ast_pass, init_compiler_intrinsics, emit_llvm_prelude, emit_pending_generics, compile_end from "lowering/core.wl"
 
+
 func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> Void {
-    // discover every module before lowering; import order must not change symbol visibility
+// discover every module before lowering, import order must not change symbol visibility
     let fake_path: Token = Token(type=TOK_STR_LIT, value="dict", line=0, col=0);
     let fake_pos: Position = Position(idx=0, ln=0, col=0, text="", fn="<prelude>");
     let star_tok: Token = Token(type=TOK_MUL, value="*", line=0, col=0);
@@ -17,7 +17,9 @@ func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> V
     let fake_syms: Vector(ImportSymbolNode) = [];
     fake_syms.append(star_sym);
 
-    if (verbose) { print("Loading compiler prelude"); }
+    if verbose {
+        print("Loading compiler prelude");
+    }
     // error is a language-level prelude item, not part of the builtin namespace
     let error_path: Token = Token(type=TOK_STR_LIT, value="errors", line=0, col=0);
     compile_import(ref c, ImportNode(type=NODE_IMPORT, path_tok=error_path, symbols=fake_syms, alias_tok=Token(), pos=fake_pos));
@@ -32,9 +34,13 @@ func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> V
         return;
     }
 
-    if (verbose) { print("Discovering source modules"); }
+    if verbose {
+        print("Discovering source modules");
+    }
     precompile_ast(ref c, node, "<main>", "", c.current_dir);
-    if (verbose) { print("Binding module preludes"); }
+    if verbose {
+        print("Binding module preludes");
+    }
     let i: Int = 0;
     while (i < c.all_modules.length()) {
         let module: ParsedModule = c.all_modules[i];
@@ -43,7 +49,7 @@ func register_program(ref c: Compiler, node: NodeID, verbose: Bool = false) -> V
         i++;
     }
 
-    if (verbose) { print("Analyzing declarations"); }
+    if verbose { print("Analyzing declarations"); }
     analyze_declarations(ref c);
     c.is_precompile_phase = false;
 }
@@ -65,7 +71,9 @@ func lower_llvm_program(ref c: Compiler) -> Void {
 
 func compile(ref c: Compiler, node: NodeID) -> Void {
     prepare_program(ref c, node);
-    if (GLOBAL_ERROR_COUNT > 0) { return; }
+    if (GLOBAL_ERROR_COUNT > 0) {
+        return;
+    }
     emit_llvm_prelude(ref c);
     lower_llvm_program(ref c);
 }

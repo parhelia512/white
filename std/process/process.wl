@@ -9,6 +9,7 @@ import "internal/runtime"
 import "internal/runtime/string" as runtime_string
 import Error as CoreError from "errors"
 
+
 error Error {
     Unknown,
     NotFound,
@@ -66,15 +67,14 @@ func __quote_windows_arg(arg: String) -> String {
         }
         i += 1;
     }
-    if (slashes > 0) {
-        result += __repeat_char('\\', slashes * 2);
-    }
+    if (slashes > 0) { result += __repeat_char('\\', slashes * 2); }
     return result + "\"";
 }
 
 func __windows_command_line(program: String, args: Vector(String)) -> String {
     let result: String = __quote_windows_arg(program);
-    let count: Int = 0; if (args is !null) { count = args.length(); }
+    let count: Int = 0;
+    if (args is !null) { count = args.length(); }
     let i: Int = 0;
     while (i < count) {
         result += " " + __quote_windows_arg(args[i]);
@@ -100,8 +100,11 @@ func __last_error() -> Error {
 }
 
 func run(program: String, args: Vector(String)) -> Int? {
-    if (!runtime_string.is_native_text(program) || program.length() == 0) { throw CoreError.InvalidArgument; }
-    let count: Int = 0; if (args is !null) { count = args.length(); }
+    if (!runtime_string.is_native_text(program) || program.length() == 0) {
+        throw CoreError.InvalidArgument;
+    }
+    let count: Int = 0;
+    if (args is !null) { count = args.length(); }
     let arg_index: Int = 0;
     while (arg_index < count) {
         if (!runtime_string.is_native_text(args[arg_index])) { throw CoreError.InvalidArgument; }
@@ -169,7 +172,9 @@ func run(program: String, args: Vector(String)) -> Int? {
 
     let bytes: UIntSize = UIntSize(count + 2) * runtime.pointer_size();
     let raw_argv: AnyPtr = runtime.mem_alloc_zeroed(bytes);
-    if (raw_argv is nullptr) { throw CoreError.OutOfMemory; }
+    if (raw_argv is nullptr) {
+        throw CoreError.OutOfMemory;
+    }
 
     let ptr native_argv: AnyPtr = raw_argv;
     native_argv[0] = runtime_string.data(program);

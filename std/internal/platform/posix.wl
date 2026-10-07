@@ -3,6 +3,7 @@
 
 import * from "../../sys/target.wl"
 
+
 extern func malloc(size: UIntSize) -> AnyPtr from "C";
 extern func calloc(count: UIntSize, size: UIntSize) -> AnyPtr from "C";
 extern func realloc(block: AnyPtr, size: UIntSize) -> AnyPtr from "C";
@@ -33,7 +34,9 @@ extern func remove(filename: AnyPtr) -> Int from "C";
 func last_errno() -> Int {
     let address: AnyPtr = nullptr;
     if (OS == Os.Linux) { address = __errno_location(); }
-    else if (OS == Os.MacOS) { address = __error(); }
+    else if (OS == Os.MacOS) {
+        address = __error();
+    }
     if (address is nullptr) { return 0; }
     let ptr value: Int = address;
     return value[0];

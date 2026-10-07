@@ -8,6 +8,7 @@ import "internal/platform/errors" as platform_errors
 import "internal/runtime/string" as runtime_string
 import Error as CoreError from "errors"
 
+
 error Error {
     Unknown,
     NotFound,
@@ -24,15 +25,21 @@ func __from_platform(kind: platform_errors.Kind) -> Error {
 }
 
 func get(name: String) -> String? {
-    if (!runtime_string.is_native_text(name) || name.length() == 0) { throw Error.InvalidName; }
+    if (!runtime_string.is_native_text(name) || name.length() == 0) {
+        throw Error.InvalidName;
+    }
     let i: Int = 0;
     while (i < name.length()) {
-        if (name[i] == Byte(61)) { throw Error.InvalidName; }
+        if (name[i] == Byte(61)) {
+            throw Error.InvalidName;
+        }
         i += 1;
     }
     if (OS == Os.Windows) {
         let wide_name: AnyPtr = windows.utf8_to_utf16(name);
-        if (wide_name is nullptr) { throw CoreError.OutOfMemory; }
+        if (wide_name is nullptr) {
+            throw CoreError.OutOfMemory;
+        }
 
         let required: Int = windows.GetEnvironmentVariableW(wide_name, nullptr, 0);
         if (required <= 0) {
@@ -58,14 +65,20 @@ func get(name: String) -> String? {
 
         let result: String = windows.utf16_to_utf8(wide_value, length);
         windows.free_utf16(wide_value);
-        if (result is null) { throw CoreError.OutOfMemory; }
+        if (result is null) {
+            throw CoreError.OutOfMemory;
+        }
         return result;
     }
 
     let native_value: AnyPtr = posix.getenv(runtime_string.data(name));
     let result: String = runtime_string.from_c_string(native_value);
-    if (result is null) { throw Error.NotFound; }
-    if (!runtime_string.is_native_text(result)) { throw Error.InvalidData; }
+    if (result is null) {
+        throw Error.NotFound;
+    }
+    if (!runtime_string.is_native_text(result)) {
+        throw Error.InvalidData;
+    }
     return result;
 }
 

@@ -1,4 +1,5 @@
-// end is normal iterator exhaustion; other errors still travel through T?
+// std/protocol/iteration.wl
+// end is normal iterator exhaustion, other errors still travel through T?
 
 error IterationError {
     End

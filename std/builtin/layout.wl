@@ -3,12 +3,12 @@
 
 @CompilerIntrinsic("size_of")
 func size_of() -> UIntSize {
-    // compiler internal implementation
+// compiler internal implementation
     return UIntSize(0);
 }
 
 @CompilerIntrinsic("align_of")
 func align_of() -> UIntSize {
-    // compiler internal implementation
+// compiler internal implementation
     return UIntSize(0);
 }

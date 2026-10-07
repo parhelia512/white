@@ -1,8 +1,9 @@
 // std/builtin/string.wl
-// String operations use the stored length and never scan for a terminator
+// string operations use the stored length and never scan for a terminator
 
 import "internal/runtime/string" as runtime_string
 import Error from "errors"
+
 
 struct __Utf8Decode(
     value: Char,
@@ -19,7 +20,9 @@ func string_at(self: String, idx: Int) -> Byte {
 
 @CompilerLink
 func string_byte_at(self: String, idx: Int) -> Byte? {
-    if (self is null || idx < 0 || idx >= self.length()) { throw Error.IndexOutOfBounds; }
+    if (self is null || idx < 0 || idx >= self.length()) {
+        throw Error.IndexOutOfBounds;
+    }
     let ptr bytes: Byte = runtime_string.data(self);
     return bytes[idx];
 }
@@ -29,7 +32,7 @@ func __utf8_continuation(value: Int) -> Bool {
 }
 
 func __utf8_decode(self: String, offset: Int) -> __Utf8Decode {
-    // decode one Unicode scalar from a known byte offset
+// decode one Unicode scalar from a known byte offset
     if (self is null || offset < 0 || offset >= self.length()) {
         return __Utf8Decode(value='\0', width=0, valid=false);
     }
@@ -110,9 +113,7 @@ func string_is_valid_utf8(self: String) -> Bool {
 
 @CompilerLink
 func string_is_char_boundary(self: String, byte_index: Int) -> Bool {
-    if (self is null || byte_index < 0 || byte_index > self.length()) {
-        return false;
-    }
+    if (self is null || byte_index < 0 || byte_index > self.length()) { return false; }
     if (byte_index == 0 || byte_index == self.length()) { return true; }
     let ptr bytes: Byte = runtime_string.data(self);
     let value: Int = Int(bytes[byte_index]);
@@ -121,12 +122,16 @@ func string_is_char_boundary(self: String, byte_index: Int) -> Bool {
 
 @CompilerLink
 func string_char_count(self: String) -> Int? {
-    if (self is null) { throw Error.InvalidArgument; }
+    if (self is null) {
+        throw Error.InvalidArgument;
+    }
     let count: Int = 0;
     let offset: Int = 0;
     while (offset < self.length()) {
         let decoded: __Utf8Decode = __utf8_decode(self, offset);
-        if (!decoded.valid) { throw Error.InvalidArgument; }
+        if (!decoded.valid) {
+            throw Error.InvalidArgument;
+        }
         count += 1;
         offset += decoded.width;
     }
@@ -135,12 +140,16 @@ func string_char_count(self: String) -> Int? {
 
 @CompilerLink
 func string_char_at(self: String, index: Int) -> Char? {
-    if (self is null || index < 0) { throw Error.IndexOutOfBounds; }
+    if (self is null || index < 0) {
+        throw Error.IndexOutOfBounds;
+    }
     let current: Int = 0;
     let offset: Int = 0;
     while (offset < self.length()) {
         let decoded: __Utf8Decode = __utf8_decode(self, offset);
-        if (!decoded.valid) { throw Error.InvalidArgument; }
+        if (!decoded.valid) {
+            throw Error.InvalidArgument;
+        }
         if (current == index) { return decoded.value; }
         current += 1;
         offset += decoded.width;

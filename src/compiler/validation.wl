@@ -1,12 +1,15 @@
-// compiler/validation.wl
+// src/compiler/validation.wl
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 
+
 func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Void {
-    if (name is null || name.length() == 0) { return; }
+    if (name is null || name.length() == 0) {
+        return;
+    }
 
     let i: Int = 0;
     while (i < name.length()) {
@@ -23,7 +26,9 @@ func register_extern_library(ref c: Compiler, name: String, pos: Position) -> Vo
 
     i = 0;
     while (i < c.extra_libs.length()) {
-        if (c.extra_libs[i] == name) { return; }
+        if (c.extra_libs[i] == name) {
+            return;
+        }
         i++;
     }
     c.extra_libs.append(name);
@@ -70,13 +75,13 @@ func reject_const_write(ref c: Compiler, node: NodeID, pos: Position) -> Bool {
     return true;
 }
 
-func is_reference_binding_initializer(ref c: Compiler, node: NodeID) -> Bool {
+func is_ref_binding_init(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node) || node_tag(node) != NODE_REF) { return false; }
     let reference: RefNode = get_ref_node(ref c.arena, node);
     return has_node(reference.node) && node_tag(reference.node) != NODE_SLICE_ACCESS;
 }
 
-func stable_reference_binding_target(ref c: Compiler, node: NodeID) -> Bool {
+func stable_ref_target(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let kind: Int = node_tag(node);
     if (kind == NODE_VAR_ACCESS) {
@@ -88,13 +93,13 @@ func stable_reference_binding_target(ref c: Compiler, node: NodeID) -> Bool {
         let owner_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.obj));
         if (is_pointer_type(ref c, owner_type)) { return false; }
         let owner: StructInfo = c.struct_id_map.lookup("" + owner_type);
-        return has_struct(owner) && !owner.is_class && stable_reference_binding_target(ref c, access.obj);
+        return has_struct(owner) && !owner.is_class && stable_ref_target(ref c, access.obj);
     }
     if (kind == NODE_INDEX_ACCESS) {
         let access: IndexAccessNode = get_index_access_node(ref c.arena, node);
         let target_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.target));
         let array: ArrayInfo = c.array_info_map.lookup("" + target_type);
-        return has_array_info(array) && array.size >= 0 && stable_reference_binding_target(ref c, access.target);
+        return has_array_info(array) && array.size >= 0 && stable_ref_target(ref c, access.target);
     }
     return false;
 }
@@ -181,7 +186,10 @@ func check_duplicate_params(params: Vector(ParamNode), owner: String, pos: Posit
     while (params is !null && i < params.length()) {
         let param: ParamNode = params[i];
         let name: String = param.name_tok.value;
-        if (seen.contains_key(name)) { throw_name_error(param.pos, "Duplicate parameter '" + name + "' in " + owner); return false; }
+        if (seen.contains_key(name)) {
+            throw_name_error(param.pos, "Duplicate parameter '" + name + "' in " + owner);
+            return false;
+        }
         seen.put(name, StringConstant(id=0, value=name));
         i += 1;
     }
@@ -190,8 +198,10 @@ func check_duplicate_params(params: Vector(ParamNode), owner: String, pos: Posit
 
 func same_method_signature(parent: FuncInfo, child: FuncInfo) -> Bool {
     if (!has_func(parent) || !has_func(child) || parent.ret_type != child.ret_type) { return false; }
-    let parent_len: Int = 0; if (parent.arg_types is !null) { parent_len = parent.arg_types.length(); }
-    let child_len: Int = 0; if (child.arg_types is !null) { child_len = child.arg_types.length(); }
+    let parent_len: Int = 0;
+    if (parent.arg_types is !null) { parent_len = parent.arg_types.length(); }
+    let child_len: Int = 0;
+    if (child.arg_types is !null) { child_len = child.arg_types.length(); }
     if (parent_len != child_len) { return false; }
     let i: Int = 1;
     while (i < parent_len) {
@@ -239,7 +249,9 @@ func class_has_interface(ref c: Compiler, class_info: StructInfo, target: Struct
             if (item.type == target.type_id) { return true; }
             i += 1;
         }
-        if (current.parent_id == 0) { break; }
+        if (current.parent_id == 0) {
+            break;
+        }
         current = c.struct_id_map.lookup("" + current.parent_id);
     }
     return false;
@@ -255,9 +267,14 @@ func is_unsuffix_int_literal(ref c: Compiler, node: NodeID) -> Bool {
 }
 
 func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos: Position) -> Vector(ArgNode) {
-    let expected: Int = 0; if (names is !null) { expected = names.length() - skip; }
-    let count: Int = 0; if (args is !null) { count = args.length(); }
-    if (count != expected) { throw_type_error(pos, "Expected " + expected + " arguments, got " + count); return null; }
+    let expected: Int = 0;
+    if (names is !null) { expected = names.length() - skip; }
+    let count: Int = 0;
+    if (args is !null) { count = args.length(); }
+    if (count != expected) {
+        throw_type_error(pos, "Expected " + expected + " arguments, got " + count);
+        return null;
+    }
     let ordered: Vector(ArgNode) = [];
     let i: Int = 0;
     while (i < expected) {
@@ -296,12 +313,15 @@ func bind_call_args(args: Vector(ArgNode), names: Vector(String), skip: Int, pos
                 throw_name_error(pos, "Unknown argument '" + arg.name + "'");
                 return null;
             }
-
         }
-        if (target < 0 || target >= expected) { throw_type_error(pos, "Too many arguments"); return null; }
+        if (target < 0 || target >= expected) {
+            throw_type_error(pos, "Too many arguments");
+            return null;
+        }
         if (has_node(ordered[target].val)) {
             let duplicate: String = names[target + skip];
-            throw_name_error(pos, "Argument '" + duplicate + "' is specified more than once"); return null;
+            throw_name_error(pos, "Argument '" + duplicate + "' is specified more than once");
+            return null;
         }
         ordered[target] = arg;
         i += 1;
@@ -421,14 +441,18 @@ func callable_types_compatible(ref c: Compiler, actual: Int, expected: Int) -> B
         expected_info = c.method_ret_map.lookup("" + expected);
     }
     if (!has_symbol(actual_info) || !has_symbol(expected_info)) { return false; }
-    if (actual_info.type != expected_info.type || actual_info.variadic_param != expected_info.variadic_param) { return false; }
+    if (actual_info.type != expected_info.type || actual_info.variadic_param != expected_info.variadic_param) {
+        return false;
+    }
     if (actual_info.func_arg_types.length() != expected_info.func_arg_types.length()) { return false; }
 
     let i: Int = 0;
     while (i < actual_info.func_arg_types.length()) {
         let actual_arg: TypeListNode = actual_info.func_arg_types[i];
         let expected_arg: TypeListNode = expected_info.func_arg_types[i];
-        if (actual_arg.type != expected_arg.type || actual_arg.pass_mode != expected_arg.pass_mode) { return false; }
+        if (actual_arg.type != expected_arg.type || actual_arg.pass_mode != expected_arg.pass_mode) {
+            return false;
+        }
         i += 1;
     }
     return true;
@@ -436,13 +460,16 @@ func callable_types_compatible(ref c: Compiler, actual: Int, expected: Int) -> B
 
 func bind_callable_args(args: Vector(ArgNode), signature: SymbolInfo, pos: Position) -> BoundCallArgs {
     let expected: Int = signature.func_arg_types.length();
-    let count: Int = 0; if (args is !null) { count = args.length(); }
+    let count: Int = 0;
+    if (args is !null) { count = args.length(); }
     let pack_index: Int = signature.variadic_param - 1;
     let ordered: Vector(ArgNode) = [];
     let packed: Vector(ArgNode) = [];
 
     if (pack_index < 0) {
-        if (reject_named_args(args, pos, "a Function or Method value")) { return BoundCallArgs(); }
+        if (reject_named_args(args, pos, "a Function or Method value")) {
+            return BoundCallArgs();
+        }
         if (count != expected) {
             throw_type_error(pos, "Argument count mismatch in Function or Method call. Expected " + expected + ", got " + count + ".");
             return BoundCallArgs();

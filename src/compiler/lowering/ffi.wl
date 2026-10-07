@@ -1,4 +1,4 @@
-// compiler/lowering/ffi.wl
+// src/compiler/lowering/ffi.wl
 import "sys"
 import * from "../../frontend/ast.wl"
 import * from "../../frontend/arena.wl"
@@ -7,28 +7,43 @@ import * from "../../frontend/diagnostics.wl"
 import * from "../target.wl"
 import * from "../validation.wl"
 
+
 func normalize_extern_abi(name: String, pos: Position) -> String {
-    if (name == "C" || name == "c") { return "C"; }
-    if (name == "system" || name == "System" || name == "SYSTEM") { return "system"; }
+    if (name == "C" || name == "c") {
+        return "C";
+    }
+    if (name == "system" || name == "System" || name == "SYSTEM") {
+        return "system";
+    }
     throw_extern_error(pos, "Unsupported extern ABI '" + name + "'. Expected 'C' or 'system'.");
     return "C";
 }
 func extern_callconv(abi_name: String) -> String {
     if (abi_name == "system" && get_target_os() == sys.Os.Windows) {
-        if (get_target_arch() == sys.Arch.X86) { return "x86_stdcallcc "; }
+        if (get_target_arch() == sys.Arch.X86) {
+            return "x86_stdcallcc ";
+        }
         if (get_target_arch() == sys.Arch.X86_64) { return "win64cc "; }
     }
     return "ccc ";
 }
 func func_callconv(info: FuncInfo) -> String {
-    if (!has_func(info) || info.abi_name is null || info.abi_name.length() == 0) { return ""; }
+    if (!has_func(info) || info.abi_name is null || info.abi_name.length() == 0) {
+        return "";
+    }
     return extern_callconv(info.abi_name);
 }
 func backend_symbol_signature(name: String) -> String {
-    if (get_target_os() != sys.Os.Windows) { return ""; }
+    if (get_target_os() != sys.Os.Windows) {
+        return "";
+    }
     let size_ty: String = get_size_llvm_type();
-    if (name == "memcpy" || name == "memmove") { return "ccc i8* (i8*, i8*, " + size_ty + ")"; }
-    if (name == "memset") { return "ccc i8* (i8*, i32, " + size_ty + ")"; }
+    if (name == "memcpy" || name == "memmove") {
+        return "ccc i8* (i8*, i8*, " + size_ty + ")";
+    }
+    if (name == "memset") {
+        return "ccc i8* (i8*, i32, " + size_ty + ")";
+    }
     return "";
 }
 func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult {
@@ -50,7 +65,8 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
     if (!check_duplicate_params(params, "extern function '" + func_name + "'", node.pos)) {
         return void_result();
     }
-    let p_len: Int = 0; if (params is !null) { p_len = params.length(); }
+    let p_len: Int = 0;
+    if (params is !null) { p_len = params.length(); }
     let p_idx: Int = 0;
     let params_str: String = "";
 
@@ -97,7 +113,9 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
     }
     let existing_decl: StringConstant = c.declared_externs.lookup(func_name);
     if (!has_string_constant(existing_decl)) {
-        if (backend_signature.length() == 0) { c.output_file.write("declare " + callconv + ret_llvm + " @" + func_name + "(" + params_str + ")\n"); }
+        if (backend_signature.length() == 0) {
+            c.output_file.write("declare " + callconv + ret_llvm + " @" + func_name + "(" + params_str + ")\n");
+        }
         c.declared_externs.put(func_name, StringConstant(id=0, value=signature));
     } else if (existing_decl.value.length() > 0 && existing_decl.value != signature) {
         throw_extern_error(node.pos, "Conflicting extern declaration for symbol '" + func_name + "'.");
@@ -110,7 +128,8 @@ func compile_extern_func(ref c: Compiler, node: ExternFuncNode) -> CompileResult
 }
 func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResult {
     let funcs: Vector(NodeID) = node.funcs;
-    let len: Int = 0; if (funcs is !null) { len = funcs.length(); }
+    let len: Int = 0;
+    if (funcs is !null) { len = funcs.length(); }
     let i: Int = 0;
     while (i < len) {
         let f_node: ExternFuncNode = get_extern_func_node(ref c.arena, funcs[i]);
@@ -119,5 +138,3 @@ func compile_extern_block(ref c: Compiler, node: ExternBlockNode) -> CompileResu
     }
     return void_result();
 }
-
-

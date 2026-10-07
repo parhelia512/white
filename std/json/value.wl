@@ -4,6 +4,7 @@ import Dict from "dict"
 import Error from "errors"
 import JsonError from "errors.wl"
 
+
 enum Kind {
     Null,
     Boolean,
@@ -14,6 +15,7 @@ enum Kind {
 }
 
 class Object {
+// preserves insertion order, the index table only accelerates key lookup
     let __values: Dict = null;
     let __keys: Vector(String) = null;
 
@@ -39,13 +41,17 @@ class Object {
 
     func get(key: String) -> Value? {
         let value: Value = self.find(key);
-        if (value is null) { throw JsonError.MissingKey; }
+        if (value is null) {
+            throw JsonError.MissingKey;
+        }
         return value;
     }
 
     func set(key: String, value: Value) -> Void? {
     // copy new keys because Dict hashes the stored bytes
-        if (key is null || value is null) { throw JsonError.InvalidValue; }
+        if (key is null || value is null) {
+            throw JsonError.InvalidValue;
+        }
         if (!self.__values.contains_key(key)) {
             let stored_key: String = key[:];
             if (stored_key is null) { throw Error.OutOfMemory; }
@@ -91,6 +97,7 @@ class Object {
 }
 
 class Value {
+// tagged JSON value, numbers retain their source spelling for lossless re-encoding
     let __kind: Kind = Kind.Null;
     let __boolean: Bool = false;
     let __number: Float = 0.0;
@@ -114,29 +121,40 @@ class Value {
     }
 
     func as_bool() -> Bool? {
-        if (self.__kind != Kind.Boolean) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Boolean) {
+            throw JsonError.TypeMismatch;
+        }
         return self.__boolean;
     }
 
     func as_float() -> Float? {
-        if (self.__kind != Kind.Number) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Number) {
+            throw JsonError.TypeMismatch;
+        }
         return self.__number;
     }
 
     func as_number_text() -> String? {
-        if (self.__kind != Kind.Number) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Number) {
+            throw JsonError.TypeMismatch;
+        }
         return self.__number_text;
     }
 
     func as_long() -> Long? {
-        if (self.__kind != Kind.Number) { throw JsonError.TypeMismatch; }
+    // accept only an integral JSON number representable by Long
+        if (self.__kind != Kind.Number) {
+            throw JsonError.TypeMismatch;
+        }
         let source: String = self.__number_text;
         if (source is null || source.length() == 0) { throw JsonError.InvalidNumber; }
 
         let negative: Bool = source[0] == '-';
         let i: Int = 0;
         if negative { i = 1; }
-        if (i >= source.length()) { throw JsonError.InvalidNumber; }
+        if (i >= source.length()) {
+            throw JsonError.InvalidNumber;
+        }
 
         let value: Long = 0L;
         let min_value: Long = -9223372036854775807L - 1L;
@@ -152,12 +170,16 @@ class Value {
         }
 
         if negative { return value; }
-        if (value == min_value) { throw JsonError.NumberOutOfRange; }
+        if (value == min_value) {
+            throw JsonError.NumberOutOfRange;
+        }
         return 0L - value;
     }
 
     func as_string() -> String? {
-        if (self.__kind != Kind.Text) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Text) {
+            throw JsonError.TypeMismatch;
+        }
         return self.__text;
     }
 
@@ -178,19 +200,27 @@ class Value {
     }
 
     func as_object() -> Object? {
-        if (self.__kind != Kind.Object) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Object) {
+            throw JsonError.TypeMismatch;
+        }
         return self.__object;
     }
 
     func length() -> Int? {
-        if (self.__kind == Kind.Array) { return self.__array.length(); }
-        if (self.__kind == Kind.Object) { return self.__object.length(); }
+        if (self.__kind == Kind.Array) {
+            return self.__array.length();
+        }
+        if (self.__kind == Kind.Object) {
+            return self.__object.length();
+        }
         throw JsonError.TypeMismatch;
         return 0;
     }
 
     func at(index: Int) -> Value? {
-        if (self.__kind != Kind.Array) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Array) {
+            throw JsonError.TypeMismatch;
+        }
         if (index < 0 || index >= self.__array.length()) {
             throw JsonError.IndexOutOfBounds;
         }
@@ -198,14 +228,19 @@ class Value {
     }
 
     func append(value: Value) -> Void? {
+    // append to an array value, other kinds report TypeMismatch
         if (self.__kind != Kind.Array) { throw JsonError.TypeMismatch; }
-        if (value is null) { throw JsonError.InvalidValue; }
+        if (value is null) {
+            throw JsonError.InvalidValue;
+        }
         self.__array.append(value);
         return;
     }
 
     func get(key: String) -> Value? {
-        if (self.__kind != Kind.Object) { throw JsonError.TypeMismatch; }
+        if (self.__kind != Kind.Object) {
+            throw JsonError.TypeMismatch;
+        }
         return self.__object.get(key)?;
     }
 
@@ -241,13 +276,17 @@ func __is_digit(value: Int) -> Bool {
 }
 
 func __parse_number(source: String) -> Float? {
-    if (source is null || source.length() == 0) { throw JsonError.InvalidNumber; }
+    if (source is null || source.length() == 0) {
+        throw JsonError.InvalidNumber;
+    }
     let i: Int = 0;
     let negative: Bool = false;
     if (source[i] == '-') {
         negative = true;
         i += 1;
-        if (i >= source.length()) { throw JsonError.InvalidNumber; }
+        if (i >= source.length()) {
+            throw JsonError.InvalidNumber;
+        }
     }
 
     let value: Float = 0.0;
@@ -258,7 +297,9 @@ func __parse_number(source: String) -> Float? {
             throw JsonError.InvalidNumber;
         }
     } else {
-        if (first < 49 || first > 57) { throw JsonError.InvalidNumber; }
+        if (first < 49 || first > 57) {
+            throw JsonError.InvalidNumber;
+        }
         while (i < source.length() && __is_digit(Int(source[i]))) {
             value = value * 10.0 + Float(Int(source[i]) - 48);
             i += 1;
@@ -290,14 +331,14 @@ func __parse_number(source: String) -> Float? {
             throw JsonError.InvalidNumber;
         }
         while (i < source.length() && __is_digit(Int(source[i]))) {
-            if (exponent < 1000000) {
-                exponent = exponent * 10 + Int(source[i]) - 48;
-            }
+            if (exponent < 1000000) { exponent = exponent * 10 + Int(source[i]) - 48; }
             i += 1;
         }
     }
 
-    if (i != source.length()) { throw JsonError.InvalidNumber; }
+    if (i != source.length()) {
+        throw JsonError.InvalidNumber;
+    }
 
     let power: Float = 1.0;
     let factor: Float = 10.0;
@@ -324,10 +365,13 @@ func boolean(value: Bool) -> Value {
 }
 
 func number_from_text(source: String) -> Value? {
+// validate JSON number grammar before preserving the original spelling
 // keep the token text so large integers survive a parse/encode round trip
     let approximation: Float = __parse_number(source)?;
     let copy: String = source[:];
-    if (copy is null) { throw Error.OutOfMemory; }
+    if (copy is null) {
+        throw Error.OutOfMemory;
+    }
     let result: Value = Value(Kind.Number);
     result.__number = approximation;
     result.__number_text = copy;
@@ -341,20 +385,28 @@ func validate_number(source: String) -> Void? {
 
 func number(value: Float) -> Value? {
     let source: String = "" + value;
-    if (source is null) { throw Error.OutOfMemory; }
+    if (source is null) {
+        throw Error.OutOfMemory;
+    }
     return number_from_text(source)?;
 }
 
 func integer(value: Long) -> Value? {
     let source: String = "" + value;
-    if (source is null) { throw Error.OutOfMemory; }
+    if (source is null) {
+        throw Error.OutOfMemory;
+    }
     return number_from_text(source)?;
 }
 
 func string(value: String) -> Value? {
-    if (value is null || !value.is_valid_utf8()) { throw JsonError.InvalidUtf8; }
+    if (value is null || !value.is_valid_utf8()) {
+        throw JsonError.InvalidUtf8;
+    }
     let copy: String = value[:];
-    if (copy is null) { throw Error.OutOfMemory; }
+    if (copy is null) {
+        throw Error.OutOfMemory;
+    }
     let result: Value = Value(Kind.Text);
     result.__text = copy;
     return result;

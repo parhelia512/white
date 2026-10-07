@@ -1,7 +1,8 @@
-// compiler/wir/lowering/state.wl
+// src/compiler/wir/lowering/state.wl
 
 import * from "../model.wl"
 import * from "../../context.wl"
+
 
 struct WirBinding(
     name: String,

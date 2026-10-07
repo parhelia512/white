@@ -1,4 +1,4 @@
-// compiler/wir/optimize.wl
+// src/compiler/wir/optimize.wl
 
 import * from "model.wl"
 
@@ -8,10 +8,19 @@ struct WirOptimizationStats(instructions: Int, blocks: Int, branches: Int, jumps
 struct WirOptimizationPlan(forwarding_distance: Int, extra_scans: Int, code_growth_percent: Int, inline_size: Int)
 
 func wir_optimization_plan(level: String) -> WirOptimizationPlan {
-    if (level == "-O1") { return WirOptimizationPlan(forwarding_distance=2, extra_scans=1, code_growth_percent=0, inline_size=0); }
-    if (level == "-O3") { return WirOptimizationPlan(forwarding_distance=-1, extra_scans=8, code_growth_percent=30, inline_size=64); }
-    if (level == "-Os") { return WirOptimizationPlan(forwarding_distance=8, extra_scans=3, code_growth_percent=0, inline_size=12); }
-    if (level == "-Oz") { return WirOptimizationPlan(forwarding_distance=-1, extra_scans=3, code_growth_percent=0, inline_size=6); }
+// budgets are deliberately finite, O3 may work harder but no level gets an open fixed point
+    if (level == "-O1") {
+        return WirOptimizationPlan(forwarding_distance=2, extra_scans=1, code_growth_percent=0, inline_size=0);
+    }
+    if (level == "-O3") {
+        return WirOptimizationPlan(forwarding_distance=-1, extra_scans=8, code_growth_percent=30, inline_size=64);
+    }
+    if (level == "-Os") {
+        return WirOptimizationPlan(forwarding_distance=8, extra_scans=3, code_growth_percent=0, inline_size=12);
+    }
+    if (level == "-Oz") {
+        return WirOptimizationPlan(forwarding_distance=-1, extra_scans=3, code_growth_percent=0, inline_size=6);
+    }
     return WirOptimizationPlan(forwarding_distance=8, extra_scans=3, code_growth_percent=10, inline_size=24);
 }
 
@@ -101,7 +110,14 @@ func wir_prepare_block_parameters(ref program: WirModule, ref offsets: Vector(In
     }
 }
 
-func wir_observe_block_arguments(ref program: WirModule, ref edge: WirEdge, ref offsets: Vector(Int), ref candidates: Vector(WirValueID), ref states: Vector(Int), ref aliases: Vector(WirValueID)) -> Void {
+func wir_observe_block_arguments(
+    ref program: WirModule,
+    ref edge: WirEdge,
+    ref offsets: Vector(Int),
+    ref candidates: Vector(WirValueID),
+    ref states: Vector(Int),
+    ref aliases: Vector(WirValueID)
+) -> Void {
     let ptr target: WirBlock = ref program.arena.blocks[wir_id_index(UInt32(edge.target))];
     let offset = offsets[wir_id_index(UInt32(edge.target))];
     let i = 0;
@@ -121,7 +137,15 @@ func wir_observe_block_arguments(ref program: WirModule, ref edge: WirEdge, ref 
     }
 }
 
-func wir_apply_block_parameter_aliases(ref program: WirModule, ref reachable: Vector(Bool), ref offsets: Vector(Int), ref candidates: Vector(WirValueID), ref states: Vector(Int), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
+func wir_apply_block_parameter_aliases(
+    ref program: WirModule,
+    ref reachable: Vector(Bool),
+    ref offsets: Vector(Int),
+    ref candidates: Vector(WirValueID),
+    ref states: Vector(Int),
+    ref aliases: Vector(WirValueID),
+    ref stats: WirOptimizationStats
+) -> Void {
     let i = 0;
     while (i < program.arena.blocks.length()) {
         if (!reachable[i]) {
@@ -303,7 +327,7 @@ func wir_forward_stack_slots(ref program: WirModule, ref removed: Vector(Bool), 
 
                         // keep the first real read, then reuse it for nearby reads
                         // of this private slot. A later store replaces the value.
-                        // Escaping addresses and atomic accesses were excluded above.
+                        // escaping addresses and atomic accesses were excluded above.
                         current[active_slot] = instruction.result;
                         generation[active_slot] = block_generation;
                         stored_at[active_slot] = j;
@@ -342,7 +366,9 @@ func wir_integer_mask(ref program: WirModule, type_id: WirTypeID) -> UInt128 {
     let type = program.arena.types[wir_id_index(UInt32(type_id))];
     let bits = type.bits;
     if (type.kind == WirTypeKind.BoolType) { bits = 1; }
-    if (bits <= 0 || bits >= 128) { return ~UInt128(0U); }
+    if (bits <= 0 || bits >= 128) {
+        return ~UInt128(0U);
+    }
     return (UInt128(1U) << UInt128(bits)) - UInt128(1U);
 }
 
@@ -415,7 +441,7 @@ func wir_copy_source(ref program: WirModule, ref instruction: WirInstruction, re
 }
 
 func wir_propagate_copies(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
-    // WIR has no copy opcode. Simple integer identities still leave copy-shaped
+// WIR has no copy opcode. Simple integer identities still leave copy-shaped
     // instructions behind, so record those in the same alias
     // table used by stack forwarding and remove them during the final compaction.
     let i = 0;
@@ -434,7 +460,7 @@ func wir_propagate_copies(ref program: WirModule, ref removed: Vector(Bool), ref
 }
 
 func wir_refold_aliases(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
-    // stack forwarding often exposes a constant after the first fold scan. One
+// stack forwarding often exposes a constant after the first fold scan. One
     // ordered pass catches that case without turning the optimizer into a fixed
     // point loop.
     let i = 0;
@@ -458,7 +484,7 @@ func wir_integer_expression(ref program: WirModule, ref instruction: WirInstruct
 
     // this is an allowlist, not the dead-code predicate. An allocation can be
     // discarded when unused, but two allocations must never become one address.
-    // Leave loads, trapping operations and IEEE floating-point operations alone.
+    // leave loads, trapping operations and IEEE floating-point operations alone.
     if (op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
         op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor &&
         op != WirOpcode.Not && op != WirOpcode.Abs && op != WirOpcode.Negate &&
@@ -499,7 +525,7 @@ func wir_expression_operand(ref program: WirModule, value: WirValueID, ref const
 
     // the builder gives each literal a fresh ID. Equal integer literals need a
     // common key here, otherwise two instances of `x & 255` never compare equal.
-    // This cache is also replace-on-collision, no global constant pool is built.
+    // this cache is also replace-on-collision, no global constant pool is built.
     let bits = item.integer;
     let hash = UInt64(bits & UInt128(18446744073709551615UL)) ^ UInt64(bits >> 64);
     hash ^= (hash >> 32) ^ (hash >> 16) ^ (hash >> 8) ^ UInt64(UInt32(item.type_id));
@@ -519,9 +545,9 @@ func wir_expression_operand(ref program: WirModule, value: WirValueID, ref const
 }
 
 func wir_reuse_expressions(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats, distance: Int) -> Void {
-    // one candidate per bucket keeps both memory and lookup work bounded. A hash
+// one candidate per bucket keeps both memory and lookup work bounded. A hash
     // collision only loses an optimization, the complete key is checked below.
-    // Block stamps avoid clearing the table for every small block in the module.
+    // block stamps avoid clearing the table for every small block in the module.
     let table: Vector(WirLocalExpr) = [];
     let constants: Vector(WirValueID) = [];
 
@@ -610,7 +636,11 @@ func wir_known_bounds_pass(ref program: WirModule, index_id: WirValueID, length_
     let mask = wir_integer_mask(ref program, index_value.type_id);
     let index = index_value.integer & mask;
     let length = length_value.integer & mask;
-    if (type.kind == WirTypeKind.UnsignedInt) { return index < length; }
+
+    if (type.kind == WirTypeKind.UnsignedInt) {
+        return index < length;
+    }
+
     let sign = UInt128(1U) << UInt128(type.bits - 1);
     if ((index & sign) != UInt128(0U)) { return false; }
     return (index ^ sign) < (length ^ sign);
@@ -689,10 +719,16 @@ func wir_thread_trivial_jumps(ref program: WirModule, ref stats: WirOptimization
             let steps = 0;
             while (steps < program.arena.blocks.length()) {
                 let jump_id = wir_trivial_jump(ref program, target);
-                if (jump_id == NO_WIR_INST) { break; }
+                if (jump_id == NO_WIR_INST) {
+                    break;
+                }
+
                 let jump = program.arena.instructions[wir_id_index(UInt32(jump_id))];
                 let next = jump.edges[0].target;
-                if (next == target) { break; }
+                if (next == target) {
+                    break;
+                }
+
                 target = next;
                 arguments = jump.edges[0].arguments;
                 steps++;
@@ -743,12 +779,12 @@ func wir_abs_add(ref program: WirModule, value_id: WirValueID, source_id: WirVal
 }
 
 func wir_recognize_abs(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
-    // This is the branchless two's-complement form of abs:
+// This is the branchless two's-complement form of abs:
     //
     //     mask = x >> (bits - 1)
     //     (x + mask) ^ mask
     //
-    // Keep the match structural. Similar-looking expressions with a different
+    // keep the match structural. Similar-looking expressions with a different
     // shift count or a second mask value must retain their original meaning.
     let i: Int = 0;
     while (i < program.arena.instructions.length()) {
@@ -794,23 +830,32 @@ func wir_active_instructions(ref program: WirModule, block_id: WirBlockID, ref r
     let i: Int = 0;
     while (i < block.instructions.length()) {
         let instruction_id: WirInstID = block.instructions[i];
-        if (!removed[wir_id_index(UInt32(instruction_id))]) { result.append(instruction_id); }
+        if (!removed[wir_id_index(UInt32(instruction_id))]) {
+            result.append(instruction_id);
+        }
+
         i++;
     }
     return result;
 }
 
 func wir_recognize_abs_branches(ref program: WirModule, ref removed: Vector(Bool), ref aliases: Vector(WirValueID), ref stats: WirOptimizationStats) -> Void {
-    // Fold the small return diamond produced by `if x < 0 { return -x }`.
-    // This is intentionally not a general if-conversion pass. Both successor
+// Fold the small return diamond produced by `if x < 0 { return -x }`.
+    // this is intentionally not a general if-conversion pass. Both successor
     // blocks must be private to the branch and contain no work besides the
     // negate and returns, so replacing the diamond cannot hide a side effect.
     let uses: Vector(Int) = [];
     let predecessors: Vector(Int) = [];
     let i: Int = 0;
-    while (i < program.arena.values.length()) { uses.append(0); i++; }
+    while (i < program.arena.values.length()) {
+        uses.append(0);
+        i++;
+    }
     i = 0;
-    while (i < program.arena.blocks.length()) { predecessors.append(0); i++; }
+    while (i < program.arena.blocks.length()) {
+        predecessors.append(0);
+        i++;
+    }
 
     i = 0;
     while (i < program.arena.instructions.length()) {
@@ -893,7 +938,9 @@ func wir_recognize_abs_branches(ref program: WirModule, ref removed: Vector(Bool
 }
 
 func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) -> Bool {
-    if (instruction.result == NO_WIR_VALUE || instruction.operands.length() == 0 || instruction.operands.length() > 2) { return false; }
+    if (instruction.result == NO_WIR_VALUE || instruction.operands.length() == 0 || instruction.operands.length() > 2) {
+        return false;
+    }
     let op = instruction.opcode;
     if (op != WirOpcode.BitAnd && op != WirOpcode.BitOr && op != WirOpcode.BitXor && op != WirOpcode.Not && op != WirOpcode.Abs && op != WirOpcode.Negate &&
         op != WirOpcode.Add && op != WirOpcode.Subtract && op != WirOpcode.Multiply &&
@@ -932,10 +979,18 @@ func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) ->
             if ((lhs & sign) != UInt128(0U)) { result = lhs | (target_mask ^ mask); }
         }
     }
-    else if (op == WirOpcode.BitAnd) { result = lhs & rhs; }
-    else if (op == WirOpcode.BitOr) { result = lhs | rhs; }
-    else if (op == WirOpcode.BitXor) { result = lhs ^ rhs; }
-    else if (op == WirOpcode.Not) { result = ~lhs & mask; }
+    else if (op == WirOpcode.BitAnd) {
+        result = lhs & rhs;
+    }
+    else if (op == WirOpcode.BitOr) {
+        result = lhs | rhs;
+    }
+    else if (op == WirOpcode.BitXor) {
+        result = lhs ^ rhs;
+    }
+    else if (op == WirOpcode.Not) {
+        result = ~lhs & mask;
+    }
     else if (op == WirOpcode.Abs) {
         let sign = UInt128(1U) << UInt128(width - 1);
         result = lhs;
@@ -964,7 +1019,9 @@ func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) ->
         // evaluate narrow arithmetic in 128 bits, then apply the WIR bit width
         if (width > 64) { return false; }
         if (op == WirOpcode.Add) { result = (lhs + rhs) & mask; }
-        else if (op == WirOpcode.Subtract) { result = (lhs + (mask - rhs) + UInt128(1U)) & mask; }
+        else if (op == WirOpcode.Subtract) {
+            result = (lhs + (mask - rhs) + UInt128(1U)) & mask;
+        }
         else { result = (lhs * rhs) & mask; }
     } else {
         let equal = lhs == rhs;
@@ -974,14 +1031,28 @@ func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) ->
             less = (lhs ^ sign) < (rhs ^ sign);
         }
         let condition = false;
-        if (op == WirOpcode.Equal) { condition = equal; }
-        else if (op == WirOpcode.NotEqual) { condition = !equal; }
-        else if (op == WirOpcode.SignedLess || op == WirOpcode.UnsignedLess) { condition = less; }
-        else if (op == WirOpcode.SignedLessEqual || op == WirOpcode.UnsignedLessEqual) { condition = less || equal; }
+        if (op == WirOpcode.Equal) {
+            condition = equal;
+        }
+        else if (op == WirOpcode.NotEqual) {
+            condition = !equal;
+        }
+        else if (op == WirOpcode.SignedLess || op == WirOpcode.UnsignedLess) {
+            condition = less;
+        }
+        else if (op == WirOpcode.SignedLessEqual || op == WirOpcode.UnsignedLessEqual) {
+            condition = less || equal;
+        }
         else if (op == WirOpcode.SignedGreater || op == WirOpcode.UnsignedGreater) { condition = !less && !equal; }
-        else if (op == WirOpcode.SignedGreaterEqual || op == WirOpcode.UnsignedGreaterEqual) { condition = !less; }
-        else { return false; }
-        if (condition) { result = UInt128(1U); }
+        else if (op == WirOpcode.SignedGreaterEqual || op == WirOpcode.UnsignedGreaterEqual) {
+            condition = !less;
+        }
+        else {
+            return false;
+        }
+        if condition {
+            result = UInt128(1U);
+        }
     }
 
     let index: Int = wir_id_index(UInt32(instruction.result));
@@ -996,11 +1067,15 @@ func wir_fold_scalar(ref program: WirModule, ref instruction: WirInstruction) ->
 }
 
 func wir_discardable(ref program: WirModule, ref instruction: WirInstruction) -> Bool {
-    // an unused result is not enough: loads, division, checks and calls can still fault
+// an unused result is not enough: loads, division, checks and calls can still fault
     let op = instruction.opcode;
     if (op == WirOpcode.StackAlloc || op == WirOpcode.StructValue || op == WirOpcode.ArrayValue || op == WirOpcode.Field || op == WirOpcode.FieldAddress) { return true; }
-    if (op == WirOpcode.Truncate || op == WirOpcode.SignExtend || op == WirOpcode.ZeroExtend || op == WirOpcode.Bitcast || op == WirOpcode.PointerToInt || op == WirOpcode.IntToPointer) { return true; }
-    if (op == WirOpcode.BitAnd || op == WirOpcode.BitOr || op == WirOpcode.BitXor || op == WirOpcode.Not || op == WirOpcode.Abs || op == WirOpcode.Negate) { return true; }
+    if (op == WirOpcode.Truncate || op == WirOpcode.SignExtend || op == WirOpcode.ZeroExtend || op == WirOpcode.Bitcast || op == WirOpcode.PointerToInt || op == WirOpcode.IntToPointer) {
+        return true;
+    }
+    if (op == WirOpcode.BitAnd || op == WirOpcode.BitOr || op == WirOpcode.BitXor || op == WirOpcode.Not || op == WirOpcode.Abs || op == WirOpcode.Negate) {
+        return true;
+    }
     if (op == WirOpcode.ShiftLeft || op == WirOpcode.SignedShiftRight || op == WirOpcode.UnsignedShiftRight) { return true; }
     if (op == WirOpcode.Equal || op == WirOpcode.NotEqual ||
         op == WirOpcode.SignedLess || op == WirOpcode.SignedLessEqual || op == WirOpcode.SignedGreater || op == WirOpcode.SignedGreaterEqual ||
@@ -1033,7 +1108,7 @@ func wir_mark_definition(ref program: WirModule, id: WirValueID, ref live: Vecto
 }
 
 func wir_remap_values(ref values: Vector(WirValueID), ref mapping: Vector(WirValueID)) -> Vector(WirValueID) {
-    // most cleanup removes void instructions; their removal does not renumber values
+// most cleanup removes void instructions, their removal does not renumber values
     let i = 0;
     while (i < values.length() && values[i] == mapping[wir_id_index(UInt32(values[i]))]) { i++; }
     if (i == values.length()) { return values; }
@@ -1047,7 +1122,7 @@ func wir_remap_values(ref values: Vector(WirValueID), ref mapping: Vector(WirVal
 }
 
 func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), ref aliases: Vector(WirValueID)) -> Void {
-    // compact once, after marking. keep function and block ids stable for metadata
+// compact once, after marking. keep function and block ids stable for metadata
     let inst_map: Vector(WirInstID) = [];
     let instructions: Vector(WirInstruction) = [];
     let i = 0;
@@ -1074,7 +1149,7 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
             keep = false;
         }
         let id = NO_WIR_VALUE;
-        if (keep) {
+        if keep {
             values.append(value);
             id = WirValueID(UInt32(values.length()));
         }
@@ -1092,7 +1167,10 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
     i = 0;
     while (i < instructions.length()) {
         let instruction: WirInstruction = instructions[i];
-        if (instruction.result != NO_WIR_VALUE) { instruction.result = value_map[wir_id_index(UInt32(instruction.result))]; }
+        if (instruction.result != NO_WIR_VALUE) {
+            instruction.result = value_map[wir_id_index(UInt32(instruction.result))];
+        }
+
         instruction.operands = wir_remap_values(ref instruction.operands, ref value_map);
         if (instruction.edges.length() != 0) {
             let edges: Vector(WirEdge) = [];
@@ -1156,7 +1234,10 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
     while (i < program.arena.globals.length()) {
         let global = program.arena.globals[i];
         global.address = value_map[wir_id_index(UInt32(global.address))];
-        if (global.initializer != NO_WIR_VALUE) { global.initializer = value_map[wir_id_index(UInt32(global.initializer))]; }
+        if (global.initializer != NO_WIR_VALUE) {
+            global.initializer = value_map[wir_id_index(UInt32(global.initializer))];
+        }
+
         program.arena.globals[i] = global;
         i++;
     }
@@ -1164,7 +1245,10 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
     while (i < program.arena.constants.length()) {
         let constant = program.arena.constants[i];
         constant.elements = wir_remap_values(ref constant.elements, ref value_map);
-        if (constant.target != NO_WIR_VALUE) { constant.target = value_map[wir_id_index(UInt32(constant.target))]; }
+        if (constant.target != NO_WIR_VALUE) {
+            constant.target = value_map[wir_id_index(UInt32(constant.target))];
+        }
+
         program.arena.constants[i] = constant;
         i++;
     }
@@ -1173,10 +1257,23 @@ func wir_compact_instructions(ref program: WirModule, ref live: Vector(Bool), re
 }
 
 func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats {
-    let stats = WirOptimizationStats(instructions=0, blocks=0, branches=0, jumps=0, constants=0, copies=0, checks=0, loads=0, stores=0, slots=0, parameters=0, expressions=0, idioms=0);
-    if (level == "-O0") {
-        return stats;
-    }
+// cheap local passes go first, each later pass consumes facts exposed by the earlier cleanup
+    let stats = WirOptimizationStats(
+        instructions=0,
+        blocks=0,
+        branches=0,
+        jumps=0,
+        constants=0,
+        copies=0,
+        checks=0,
+        loads=0,
+        stores=0,
+        slots=0,
+        parameters=0,
+        expressions=0,
+        idioms=0
+    );
+    if (level == "-O0") { return stats; }
 
     // one reachability walk and one backwards use walk, no repeated module scan
     let reachable: Vector(Bool) = [];
@@ -1189,13 +1286,19 @@ func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats
     let parameter_states: Vector(Int) = [];
     let i = 0;
     wir_prepare_block_parameters(ref program, ref parameter_offsets, ref parameter_candidates, ref parameter_states);
-    while (i < program.arena.blocks.length()) { reachable.append(false); i++; }
+    while (i < program.arena.blocks.length()) {
+        reachable.append(false);
+        i++;
+    }
     i = 0;
     while (i < program.arena.instructions.length()) {
         live.append(false);
         let constant = wir_fold_scalar(ref program, ref program.arena.instructions[i]);
         folded.append(constant);
-        if (constant) { stats.constants++; }
+        if constant {
+            stats.constants++;
+        }
+
         i++;
     }
     let plan = wir_optimization_plan(level);
@@ -1323,7 +1426,9 @@ func optimize_wir(ref program: WirModule, level: String) -> WirOptimizationStats
         let j = 0;
         while (j < function.blocks.length()) {
             let block: WirBlockID = function.blocks[j];
-            if (reachable[wir_id_index(UInt32(block))]) { kept.append(block); }
+            if (reachable[wir_id_index(UInt32(block))]) {
+                kept.append(block);
+            }
             else { stats.blocks++; }
             j++;
         }

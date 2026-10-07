@@ -3,6 +3,7 @@
 
 import "internal/runtime/string" as runtime_string
 
+
 func signed_decimal_digits(value: Long) -> Int {
     let probe: Long = value;
     let digits: Int = 1;
@@ -31,7 +32,9 @@ func format_long(value: Long) -> String {
         let digit: Int = Int(0L - (work % 10L));
         output[pos] = Byte(digit + 48);
         work /= 10L;
-        if (work == 0L) { break; }
+        if (work == 0L) {
+            break;
+        }
         pos -= 1;
     }
     if negative { output[0] = Byte(45); }
@@ -125,9 +128,7 @@ func format_uint128_magnitude(value: UInt128, negative: Bool) -> String {
     if (result is null) { return null; }
     let ptr output: Byte = runtime_string.data(result);
 
-    if negative {
-        output[0] = Byte(45);
-    }
+    if negative { output[0] = Byte(45); }
 
     let output_pos: Int = length - 1;
     let chunk_idx: Int = 0;

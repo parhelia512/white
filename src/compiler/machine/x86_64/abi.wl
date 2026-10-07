@@ -1,18 +1,16 @@
-// compiler/machine/x86_64/abi.wl
+// src/compiler/machine/x86_64/abi.wl
 import * from "model.wl"
 import WirTypeLayout from "../../wir/model.wl"
 
+
 func x86_win64_aggregate_size(layout: WirTypeLayout) -> Int {
-    // small POD aggregates use integer registers, even when their fields are floats
-    if (!layout.valid) {
-        return 0;
-    }
+// small POD aggregates use integer registers, even when their fields are floats
+    if (!layout.valid) { return 0; }
     if (layout.size == 1UL || layout.size == 2UL || layout.size == 4UL || layout.size == 8UL) {
         return Int(layout.size);
     }
     return 0;
 }
-
 
 struct X86Win64ABI(
     pointer_bits: Int,
@@ -23,9 +21,8 @@ struct X86Win64ABI(
     callee_saved: Vector(X86Register)
 )
 
-
 func x86_win64_abi() -> X86Win64ABI {
-    // Win64 has four argument positions, not four integer plus four float args.
+// Win64 has four argument positions, not four integer plus four float args.
     // Keep both lists together, callers and callees must count positions the same way.
     return X86Win64ABI(
         pointer_bits=64,
@@ -44,49 +41,31 @@ func x86_win64_abi() -> X86Win64ABI {
 }
 
 func x86_win64_argument_register(index: Int, floating: Bool) -> X86Register {
-    // this runs for each call argument, building the full ABI description here
+// this runs for each call argument, building the full ABI description here
     // would allocate three vectors just to select one of four registers.
-    if (index < 0 || index >= 4) {
-        return X86Register.None;
-    }
+    if (index < 0 || index >= 4) { return X86Register.None; }
 
     if floating {
-        if (index == 0) {
-            return X86Register.XMM0;
-        }
-        if (index == 1) {
-            return X86Register.XMM1;
-        }
-        if (index == 2) {
-            return X86Register.XMM2;
-        }
+        if (index == 0) { return X86Register.XMM0; }
+        if (index == 1) { return X86Register.XMM1; }
+        if (index == 2) { return X86Register.XMM2; }
         return X86Register.XMM3;
     }
-    if (index == 0) {
-        return X86Register.RCX;
-    }
-    if (index == 1) {
-        return X86Register.RDX;
-    }
-    if (index == 2) {
-        return X86Register.R8;
-    }
+    if (index == 0) { return X86Register.RCX; }
+    if (index == 1) { return X86Register.RDX; }
+    if (index == 2) { return X86Register.R8; }
     return X86Register.R9;
 }
 
 func x86_win64_stack_arg_offset(index: Int) -> Int {
-    if (index < 4) {
-        return -1;
-    }
+    if (index < 4) { return -1; }
 
     // the first 32 bytes belong to the four register arguments
     return 32 + (index - 4) * 8;
 }
 
 func x86_win64_stack_param_offset(index: Int) -> Int {
-    if (index < 4) {
-        return -1;
-    }
+    if (index < 4) { return -1; }
 
     // return address and saved RBP put the same argument 16 bytes farther away
     return 48 + (index - 4) * 8;
@@ -94,9 +73,7 @@ func x86_win64_stack_param_offset(index: Int) -> Int {
 
 func x86_win64_call_frame(argument_count: Int) -> Int {
     let size: Int = 32;
-    if (argument_count > 4) {
-        size += (argument_count - 4) * 8;
-    }
+    if (argument_count > 4) { size += (argument_count - 4) * 8; }
     return (size + 15) & -16;
 }
 
@@ -105,9 +82,7 @@ func x86_win64_is_callee_saved(register: X86Register) -> Bool {
 
     let i: Int = 0;
     while (i < abi.callee_saved.length()) {
-        if (abi.callee_saved[i] == register) {
-            return true;
-        }
+        if (abi.callee_saved[i] == register) { return true; }
         i++;
     }
 

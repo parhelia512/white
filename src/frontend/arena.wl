@@ -1,8 +1,10 @@
-// frontend/arena.wl
+// src/frontend/arena.wl
 import * from "ast.wl"
+
 
 // nodes are grouped by payload type, the handle carries the table tag and slot
 struct AstArena(
+    // payloads live in typed tables, NodeID stores the table tag and one based slot
     int_nodes: Vector(IntNode),
     float_nodes: Vector(FloatNode),
     binop_nodes: Vector(BinOpNode),
@@ -60,6 +62,7 @@ struct AstArena(
 )
 
 func new_ast_arena() -> AstArena {
+// keep every table allocated here, adding a node kind should require changing this constructor
     return AstArena(
         int_nodes=[],
         float_nodes=[],

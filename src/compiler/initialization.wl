@@ -1,9 +1,10 @@
-// compiler/initialization.wl
+// src/compiler/initialization.wl
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "target_eval.wl"
+
 
 struct InitFlow(
     initialized: Vector(String),
@@ -26,7 +27,9 @@ func init_has(initialized: Vector(String), name: String) -> Bool {
 }
 
 func init_add(initialized: Vector(String), name: String) -> Void {
-    if (!init_has(initialized, name)) { initialized.append(name); }
+    if (!init_has(initialized, name)) {
+        initialized.append(name);
+    }
 }
 
 func init_copy(initialized: Vector(String)) -> Vector(String) {
@@ -44,7 +47,9 @@ func init_intersection(left: Vector(String), right: Vector(String)) -> Vector(St
     let result: Vector(String) = [];
     let i: Int = 0;
     while (i < left.length()) {
-        if (init_has(right, left[i])) { result.append(left[i]); }
+        if (init_has(right, left[i])) {
+            result.append(left[i]);
+        }
         i += 1;
     }
     return result;
@@ -74,7 +79,9 @@ func lookup_local_init(ref scope: LocalInitScope, name: String) -> String {
     while (current is !nullptr) {
         let info: SymbolInfo = current.table.lookup(name);
         if (has_symbol(info)) {
-            if (info.type <= 0) { return ""; }
+            if (info.type <= 0) {
+                return "";
+            }
             return "" + (info.type - 1);
         }
         current = current.parent;
@@ -91,9 +98,15 @@ func read_local_init(ref scope: LocalInitScope, initialized: Vector(String), nam
 
 func merge_local_init(before: Vector(String), success: InitFlow, failure: InitFlow) -> InitFlow {
 // a terminating edge contributes no state to the code that follows
-    if (success.terminates && failure.terminates) { return InitFlow(before, true); }
-    if (success.terminates) { return InitFlow(failure.initialized, false); }
-    if (failure.terminates) { return InitFlow(success.initialized, false); }
+    if (success.terminates && failure.terminates) {
+        return InitFlow(before, true);
+    }
+    if (success.terminates) {
+        return InitFlow(failure.initialized, false);
+    }
+    if (failure.terminates) {
+        return InitFlow(success.initialized, false);
+    }
     return InitFlow(init_intersection(success.initialized, failure.initialized), false);
 }
 
@@ -106,7 +119,10 @@ func check_local_init_block(ref c: Compiler, node: NodeID, ref parent: LocalInit
     while (block.stmts is !null && i < block.stmts.length()) {
         let flow: InitFlow = check_local_init_node(ref c, block.stmts[i], ref scope, state);
         state = flow.initialized;
-        if (flow.terminates) { terminates = true; break; }
+        if (flow.terminates) {
+            terminates = true;
+            break;
+        }
         i += 1;
     }
 
@@ -127,10 +143,14 @@ func check_local_init_block(ref c: Compiler, node: NodeID, ref parent: LocalInit
 
 func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitScope, initialized: Vector(String)) -> InitFlow {
 // each result carries the definite set together with control-flow termination
-    if (!has_node(node)) { return InitFlow(initialized, false); }
+    if (!has_node(node)) {
+        return InitFlow(initialized, false);
+    }
     let base: Int = node_tag(node);
 
-    if (base == NODE_BLOCK) { return check_local_init_block(ref c, node, ref scope, initialized); }
+    if (base == NODE_BLOCK) {
+        return check_local_init_block(ref c, node, ref scope, initialized);
+    }
     if (base == NODE_VAR_ACCESS) {
         let access: VarAccessNode = get_var_access_node(ref c.arena, node);
         read_local_init(ref scope, initialized, access.name_tok.value, access.pos);
@@ -147,7 +167,9 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         let assignment: VarAssignNode = get_var_assign_node(ref c.arena, node);
         let value_flow: InitFlow = check_local_init_node(ref c, assignment.value, ref scope, initialized);
         let key: String = lookup_local_init(ref scope, assignment.name_tok.value);
-        if (key.length() > 0) { init_add(value_flow.initialized, key); }
+        if (key.length() > 0) {
+            init_add(value_flow.initialized, key);
+        }
         return InitFlow(value_flow.initialized, false);
     }
     if (base == NODE_CATCH) {
@@ -166,11 +188,17 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
             let boolean: BooleanNode = get_bool_node(ref c.arena, branch.condition);
             selected = boolean.value;
         }
-        if (selected == 1) { return check_local_init_node(ref c, branch.body, ref scope, condition_flow.initialized); }
-        if (selected == 0) { return check_local_init_node(ref c, branch.else_body, ref scope, condition_flow.initialized); }
+        if (selected == 1) {
+            return check_local_init_node(ref c, branch.body, ref scope, condition_flow.initialized);
+        }
+        if (selected == 0) {
+            return check_local_init_node(ref c, branch.else_body, ref scope, condition_flow.initialized);
+        }
         let then_flow: InitFlow = check_local_init_node(ref c, branch.body, ref scope, init_copy(condition_flow.initialized));
         let else_flow: InitFlow = InitFlow(init_copy(condition_flow.initialized), false);
-        if (has_node(branch.else_body)) { else_flow = check_local_init_node(ref c, branch.else_body, ref scope, init_copy(condition_flow.initialized)); }
+        if (has_node(branch.else_body)) {
+            else_flow = check_local_init_node(ref c, branch.else_body, ref scope, init_copy(condition_flow.initialized));
+        }
         return merge_local_init(condition_flow.initialized, then_flow, else_flow);
     }
     if (base == NODE_WHILE) {
@@ -182,10 +210,14 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
     if (base == NODE_FOR) {
         let loop: ForNode = get_for_node(ref c.arena, node);
         let state: Vector(String) = initialized;
-        if (has_node(loop.init)) { state = check_local_init_node(ref c, loop.init, ref scope, state).initialized; }
+        if (has_node(loop.init)) {
+            state = check_local_init_node(ref c, loop.init, ref scope, state).initialized;
+        }
         state = check_local_init_node(ref c, loop.cond, ref scope, state).initialized;
         let body_flow: InitFlow = check_local_init_node(ref c, loop.body, ref scope, init_copy(state));
-        if (!body_flow.terminates) { check_local_init_node(ref c, loop.step, ref scope, body_flow.initialized); }
+        if (!body_flow.terminates) {
+            check_local_init_node(ref c, loop.step, ref scope, body_flow.initialized);
+        }
         return InitFlow(state, must_terminate(ref c, node));
     }
     if (base == NODE_RETURN) {
@@ -198,7 +230,9 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
         check_local_init_node(ref c, statement.value, ref scope, initialized);
         return InitFlow(initialized, true);
     }
-    if (base == NODE_BREAK || base == NODE_CONTINUE) { return InitFlow(initialized, true); }
+    if (base == NODE_BREAK || base == NODE_CONTINUE) {
+        return InitFlow(initialized, true);
+    }
     if (base == NODE_BINOP || base == NODE_IS || base == NODE_IS_NOT) {
         let binary: BinOpNode = get_binop_node(ref c.arena, node);
         let left_flow: InitFlow = check_local_init_node(ref c, binary.left, ref scope, initialized);
@@ -310,7 +344,9 @@ func check_local_init_node(ref c: Compiler, node: NodeID, ref scope: LocalInitSc
 }
 
 func check_local_init(ref c: Compiler, body: NodeID) -> Void {
-    if (!has_node(body)) { return; }
+    if (!has_node(body)) {
+        return;
+    }
     let root: LocalInitScope = LocalInitScope(table=Dict(), parent=nullptr, declarations=[]);
     check_local_init_block(ref c, body, ref root, []);
 }
@@ -358,9 +394,7 @@ func init_is_self(ref c: Compiler, node: NodeID) -> Bool {
 }
 
 func class_requires_initialization(ref c: Compiler, info: StructInfo) -> Bool {
-    if (!has_struct(info) || !info.is_class || !has_node(info.init_body)) {
-        return false;
-    }
+    if (!has_struct(info) || !info.is_class || !has_node(info.init_body)) { return false; }
 
     let class_node: ClassDefNode = get_class_def_node(ref c.arena, info.init_body);
     let fields: Vector(NodeID) = class_node.fields;
@@ -380,7 +414,9 @@ func class_requires_initialization(ref c: Compiler, info: StructInfo) -> Bool {
 
 func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required: Vector(String), known_fields: Vector(String), initialized: Vector(String)) -> InitFlow {
 // field initialization uses the same forward meet as locals, with self reads checked here
-    if (!has_node(node)) { return InitFlow(initialized, false); }
+    if (!has_node(node)) {
+        return InitFlow(initialized, false);
+    }
     let base: Int = node_tag(node);
 
     if (base == NODE_BLOCK) {
@@ -532,8 +568,12 @@ func check_init_node(ref c: Compiler, class_name: String, node: NodeID, required
         if (success.terminates && failure.terminates) {
             return InitFlow(initialized, true);
         }
-        if (success.terminates) { return InitFlow(failure.initialized, false); }
-        if (failure.terminates) { return InitFlow(success.initialized, false); }
+        if (success.terminates) {
+            return InitFlow(failure.initialized, false);
+        }
+        if (failure.terminates) {
+            return InitFlow(success.initialized, false);
+        }
         return InitFlow(
             init_intersection(success.initialized, failure.initialized),
             false
@@ -837,7 +877,9 @@ func check_class_initialization(ref c: Compiler, class_name: String, node: Class
     }
 
     let default_state: Vector(String) = [];
-    if (!parent_requires_init) { default_state.append("$super"); }
+    if (!parent_requires_init) {
+        default_state.append("$super");
+    }
     i = 0;
     while (fields is !null && i < fields.length()) {
         let field: VarDeclareNode = get_var_decl_node(ref c.arena, fields[i]);
@@ -855,7 +897,9 @@ func check_class_initialization(ref c: Compiler, class_name: String, node: Class
         i += 1;
     }
 
-    if (required.length() == 0) { return; }
+    if (required.length() == 0) {
+        return;
+    }
 
     let initializer_id: NodeID = NO_NODE;
     let methods: Vector(NodeID) = node.methods;
@@ -908,7 +952,9 @@ func check_class_initialization(ref c: Compiler, class_name: String, node: Class
 }
 
 func emit_class_field_initializers(ref c: Compiler, class_info: StructInfo, object_reg: String, object_llvm_type: String) -> Void {
-    if (!has_struct(class_info)) { return; }
+    if (!has_struct(class_info)) {
+        return;
+    }
 
     if (class_info.parent_id != 0) {
         let parent: StructInfo =
@@ -923,24 +969,28 @@ func emit_class_field_initializers(ref c: Compiler, class_info: StructInfo, obje
 
     let initializer: FuncInfo =
         c.func_table.lookup(class_info.name + "_$field_init");
-    if (!has_func(initializer)) { return; }
+    if (!has_func(initializer)) {
+        return;
+    }
     queue_generic_class_method(ref c, class_info, "$field_init");
 
     let target_reg: String = object_reg;
     if (class_info.llvm_name != object_llvm_type) {
         target_reg = next_reg(ref c);
         c.output_file.write(
+
             c.indent + target_reg + " = bitcast " +
             object_llvm_type + "* " + object_reg + " to " +
             class_info.llvm_name + "*\n"
         );
     }
+
     c.output_file.write(
+
         c.indent + "call void @" + initializer.name + "(" +
         class_info.llvm_name + "* " + target_reg + ")\n"
     );
 }
-
 
 func must_terminate(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
@@ -989,7 +1039,10 @@ func must_terminate(ref c: Compiler, node: NodeID) -> Bool {
         if (!has_node(loop.cond) && !has_loop_break(ref c, loop.body)) { return true; }
         if (has_node(loop.cond)) {
             let condition: Int = node_tag(loop.cond);
-            if (condition == NODE_BOOL) { let boolean: BooleanNode = get_bool_node(ref c.arena, loop.cond); if (boolean.value == 1 && !has_loop_break(ref c, loop.body)) { return true; } }
+            if (condition == NODE_BOOL) {
+                let boolean: BooleanNode = get_bool_node(ref c.arena, loop.cond);
+                if (boolean.value == 1 && !has_loop_break(ref c, loop.body)) { return true; }
+            }
         }
     }
     return false;
@@ -1021,4 +1074,3 @@ func has_loop_break(ref c: Compiler, node: NodeID) -> Bool {
     }
     return false;
 }
-

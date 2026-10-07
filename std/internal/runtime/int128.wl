@@ -4,15 +4,21 @@
 func uint128_div_rem(dividend: UInt128, divisor: UInt128, ptr remainder_out: UInt128) -> UInt128 {
 // perform binary long division without compiler-rt helpers
     if (divisor == UInt128(0)) {
-        if (remainder_out is !nullptr) { deref remainder_out = UInt128(0); }
+        if (remainder_out is !nullptr) {
+            deref remainder_out = UInt128(0);
+        }
         return UInt128(0);
     }
     if (dividend < divisor) {
-        if (remainder_out is !nullptr) { deref remainder_out = dividend; }
+        if (remainder_out is !nullptr) {
+            deref remainder_out = dividend;
+        }
         return UInt128(0);
     }
     if (divisor == UInt128(1)) {
-        if (remainder_out is !nullptr) { deref remainder_out = UInt128(0); }
+        if (remainder_out is !nullptr) {
+            deref remainder_out = UInt128(0);
+        }
         return dividend;
     }
 
@@ -56,7 +62,9 @@ func int128_div(dividend: Int128, divisor: Int128) -> Int128 {
     if divisor_negative { divisor_magnitude = UInt128(0) - divisor_magnitude; }
 
     let quotient: UInt128 = uint128_div(dividend_magnitude, divisor_magnitude);
-    if (dividend_negative != divisor_negative) { return Int128(UInt128(0) - quotient); }
+    if (dividend_negative != divisor_negative) {
+        return Int128(UInt128(0) - quotient);
+    }
     return Int128(quotient);
 }
 
@@ -69,6 +77,8 @@ func int128_rem(dividend: Int128, divisor: Int128) -> Int128 {
     if (divisor < Int128(0)) { divisor_magnitude = UInt128(0) - divisor_magnitude; }
 
     let remainder: UInt128 = uint128_rem(dividend_magnitude, divisor_magnitude);
-    if dividend_negative { return Int128(UInt128(0) - remainder); }
+    if dividend_negative {
+        return Int128(UInt128(0) - remainder);
+    }
     return Int128(remainder);
 }

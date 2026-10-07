@@ -1,4 +1,4 @@
-// compiler/modules.wl
+// src/compiler/modules.wl
 import "file"
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
@@ -9,6 +9,7 @@ import Lexer, new_lexer, get_next_token from "../frontend/lexer.wl"
 import Parser, parse from "../frontend/parser.wl"
 import * from "target_eval.wl"
 import * from "registration.wl"
+
 
 func precompile_ast(ref c: Compiler, node: NodeID, final_path: String, import_prefix: String, old_dir: String) -> Void {
 // imports must be bound before this module publishes its declarations
@@ -90,9 +91,13 @@ func reserve_module_prefix(ref c: Compiler, canonical_name: String, final_path: 
 
 func bind_loaded_prelude(ref c: Compiler, path: String, pos: Position) -> Void {
     let final_path: String = resolve_import_path(ref c, path, pos);
-    if (final_path is null || final_path.length() == 0) { return; }
+    if (final_path is null || final_path.length() == 0) {
+        return;
+    }
     let loaded: StringConstant = c.imported_modules.lookup(final_path);
-    if (!has_string_constant(loaded)) { return; }
+    if (!has_string_constant(loaded)) {
+        return;
+    }
     let star: Token = Token(type=TOK_MUL, value="*", line=pos.ln, col=pos.col);
     let symbols: Vector(ImportSymbolNode) = [ImportSymbolNode(name_tok=star, alias_tok=Token())];
     let path_tok: Token = Token(type=TOK_STR_LIT, value=path, line=pos.ln, col=pos.col);
@@ -108,15 +113,15 @@ func bind_module_prelude(ref c: Compiler, pos: Position) -> Void {
 func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let raw_path: String = node.path_tok.value;
     let final_path: String = resolve_import_path(ref c, raw_path, node.pos);
-    if (final_path is null || final_path.length() == 0) { return; }
+    if (final_path is null || final_path.length() == 0) {
+        return;
+    }
 
     let is_pkg: Bool = final_path.ends_with("/_pkg.wl") || final_path.ends_with("\\_pkg.wl");
 
     let len: Int = raw_path.length();
     let end_idx: Int = len;
-    if (raw_path.ends_with(".wl")) {
-        end_idx = len - 3;
-    }
+    if (raw_path.ends_with(".wl")) { end_idx = len - 3; }
     let start_idx: Int = 0;
     let i: Int = len - 1;
     while (i >= 0) {
@@ -130,9 +135,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
     let canonical_name: String = raw_path.slice(start_idx, end_idx);
 
     let module_name: String = canonical_name;
-    if (node.alias_tok.value is !null) {
-        module_name = node.alias_tok.value;
-    }
+    if (node.alias_tok.value is !null) { module_name = node.alias_tok.value; }
 
     let loaded_module: StringConstant = c.imported_modules.lookup(final_path);
     let import_prefix: String = "";
@@ -142,7 +145,9 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         import_prefix = reserve_module_prefix(ref c, canonical_name, final_path);
     }
     if (node.symbols is null) {
-        if (c.current_file_namespaces.contains_key(module_name)) { unbind_namespace(ref c, module_name); }
+        if (c.current_file_namespaces.contains_key(module_name)) {
+            unbind_namespace(ref c, module_name);
+        }
         let existing_prefix: String = c.current_file_visible_prefixes.lookup(module_name);
         if (existing_prefix is !null && existing_prefix != import_prefix) {
             throw_import_error(node.pos, "Module name '" + module_name + "' is already bound to another module.");
@@ -159,7 +164,10 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
             let is_star: Bool = false;
             while (i < s_len) {
                 let curr_sym: ImportSymbolNode = node.symbols[i];
-                if (curr_sym.name_tok.type == TOK_MUL) { is_star = true; break; }
+                if (curr_sym.name_tok.type == TOK_MUL) {
+                    is_star = true;
+                    break;
+                }
                 i += 1;
             }
             if is_star {
@@ -170,7 +178,7 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         } else {
             export_module_symbols(ref c, import_prefix, true, module_name);
         }
-        return; 
+        return;
     }
 
     let f: file.File = file.open(final_path)?;
@@ -231,7 +239,10 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         let is_star: Bool = false;
         while (i < s_len) {
             let curr_sym: ImportSymbolNode = node.symbols[i];
-            if (curr_sym.name_tok.type == TOK_MUL) { is_star = true; break; }
+            if (curr_sym.name_tok.type == TOK_MUL) {
+                is_star = true;
+                break;
+            }
             i += 1;
         }
         if is_star {
@@ -243,4 +254,3 @@ func compile_import(ref c: Compiler, node: ImportNode) -> Void {
         export_module_symbols(ref c, import_prefix, true, module_name);
     }
 }
-

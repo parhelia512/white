@@ -3,6 +3,7 @@
 
 import "memory.wl" as memory
 
+
 const __STRING_TYPE_ID: Int = 5;
 const __OBJECT_HEADER_SIZE: Int = 8;
 
@@ -41,11 +42,15 @@ func data(value: String) -> AnyPtr {
 }
 
 func set_length(value: String, length: Int) -> Void {
-    if (value is null || length < 0) { return; }
+    if (value is null || length < 0) {
+        return;
+    }
     let ptr value_bytes: Byte = AnyPtr(value);
     let lengths_address: AnyPtr = ref value_bytes[Int(size_of(AnyPtr))];
     let ptr lengths: Int = lengths_address;
-    if (length > lengths[1]) { return; }
+    if (length > lengths[1]) {
+        return;
+    }
     lengths[0] = length;
     let ptr bytes: Byte = data(value);
     bytes[length] = Byte(0);
@@ -80,7 +85,9 @@ func is_native_text(value: String) -> Bool {
 
         let width: Int = 0;
         if (first >= 194 && first <= 223) { width = 2; }
-        else if (first >= 224 && first <= 239) { width = 3; }
+        else if (first >= 224 && first <= 239) {
+            width = 3;
+        }
         else if (first >= 240 && first <= 244) { width = 4; }
         else { return false; }
         if (offset + width > value.length()) { return false; }
@@ -105,11 +112,9 @@ func is_native_text(value: String) -> Bool {
 
 @CompilerLink("utf8_encode_char")
 func encode_utf8_char(value: Char) -> String {
-    // encode one Unicode scalar as UTF-8
+// encode one Unicode scalar as UTF-8
     let scalar: Int = Int(value);
-    if (scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343)) {
-        return null;
-    }
+    if (scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343)) { return null; }
 
     let width: Int = 1;
     if (scalar > 127) { width = 2; }

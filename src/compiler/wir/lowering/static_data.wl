@@ -1,4 +1,4 @@
-// compiler/wir/lowering/static_data.wl
+// src/compiler/wir/lowering/static_data.wl
 
 import * from "../model.wl"
 import * from "../builder.wl"
@@ -9,6 +9,7 @@ import * from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
 
+
 func wir_static_cast_target(ref source: Compiler, callee: NodeID) -> Int {
     let kind: Int = node_tag(callee);
     if (kind != NODE_VAR_ACCESS && kind != NODE_FIELD_ACCESS) { return 0; }
@@ -18,6 +19,7 @@ func wir_static_cast_target(ref source: Compiler, callee: NodeID) -> Int {
     return get_cast_target(ref source, name);
 }
 import Position from "../../../frontend/diagnostics.wl"
+
 
 func wir_truncate_integer(value: UInt128, bits: Int) -> UInt128 {
     if (bits >= 128) { return value; }
@@ -44,7 +46,15 @@ func wir_lower_string_constant(ref types: WirTypeMap, ref program: WirModule, va
     let ref_count: WirValueID = wir_const_int(ref program, int_type, UInt128(WIR_STATIC_REFCOUNT));
     let type_id: WirValueID = wir_const_int(ref program, int_type, UInt128(UInt32(TYPE_STRING)));
     let object: WirValueID = wir_const_aggregate(ref program, wir_string_object_layout(ref types, ref program), [ref_count, type_id, string]);
-    let object_global: WirGlobalID = wir_add_aligned_global(ref program, name, wir_string_object_layout(ref types, ref program), object, WirLinkage.Private, true, program.data_layout.pointer_alignment);
+    let object_global: WirGlobalID = wir_add_aligned_global(
+        ref program,
+        name,
+        wir_string_object_layout(ref types, ref program),
+        object,
+        WirLinkage.Private,
+        true,
+        program.data_layout.pointer_alignment
+    );
     let result: WirValueID = wir_const_address(ref program, wir_string_layout(ref types, ref program), wir_global_value(ref program, object_global), Long(WIR_STRING_HEADER_SIZE));
     types.string_values.put(value, result);
     return result;
@@ -53,11 +63,15 @@ func wir_lower_string_constant(ref types: WirTypeMap, ref program: WirModule, va
 func wir_static_array(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, source_type: Int, pos: Position) -> WirValueID {
     let repr: Int = get_repr_type(ref source, source_type);
     let info: ArrayInfo = source.array_info_map.lookup("" + repr);
-    if (!has_array_info(info) || info.size < 0 || node_tag(node) != NODE_VECTOR_LIT) { return NO_WIR_VALUE; }
+    if (!has_array_info(info) || info.size < 0 || node_tag(node) != NODE_VECTOR_LIT) {
+        return NO_WIR_VALUE;
+    }
 
     let literal: VectorLitNode = get_vector_lit_node(ref source.arena, node);
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, source_type);
-    if (literal.elements.length() == 0) { return wir_const_zero(ref program, type_id); }
+    if (literal.elements.length() == 0) {
+        return wir_const_zero(ref program, type_id);
+    }
     if (literal.elements.length() != info.size) {
         types.errors.append("Partially initialized static arrays are not supported by WIR yet");
         return NO_WIR_VALUE;
@@ -172,8 +186,12 @@ func wir_lower_static_value(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (repr == TYPE_STRING && kind == NODE_STRING) {
         return wir_lower_string_constant(ref types, ref program, get_string_node(ref source.arena, node).tok.value);
     }
-    if (repr == TYPE_BOOL) { return wir_const_bool(ref program, eval_const_bool(ref source, node, pos) != 0); }
-    if (repr == TYPE_CHAR) { return wir_const_int(ref program, type_id, UInt128(eval_const_long(ref source, node, pos))); }
+    if (repr == TYPE_BOOL) {
+        return wir_const_bool(ref program, eval_const_bool(ref source, node, pos) != 0);
+    }
+    if (repr == TYPE_CHAR) {
+        return wir_const_int(ref program, type_id, UInt128(eval_const_long(ref source, node, pos)));
+    }
     if (is_integer_type(repr)) {
         let value: UInt128 = eval_const_wide(ref source, node, pos, is_unsigned_integer(repr));
         return wir_const_int(ref program, type_id, wir_truncate_integer(value, get_type_bitwidth(repr)));

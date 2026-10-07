@@ -1,11 +1,11 @@
-// compiler/analysis.wl
-
+// src/compiler/analysis.wl
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "context.wl"
 import * from "validation.wl"
 import check_class_initialization from "initialization.wl"
+
 
 struct TypeAnalysisTarget(
     node: NodeID,
@@ -44,7 +44,9 @@ func extend_type_path(stack: Vector(Int), type_id: Int) -> Vector(Int) {
 
 func value_struct_dependency(ref c: Compiler, type_id: Int) -> Int {
     let named: NamedTypeInfo = get_named_type(ref c, type_id);
-    if (has_named_type(named)) { return value_struct_dependency(ref c, named.underlying_type); }
+    if (has_named_type(named)) {
+        return value_struct_dependency(ref c, named.underlying_type);
+    }
 
     let array: ArrayInfo = c.array_info_map.lookup("" + type_id);
     if (has_array_info(array)) {
@@ -53,10 +55,14 @@ func value_struct_dependency(ref c: Compiler, type_id: Int) -> Int {
     }
 
     let fallible: SymbolInfo = c.fallible_base_map.lookup("" + type_id);
-    if (has_symbol(fallible)) { return value_struct_dependency(ref c, fallible.type); }
+    if (has_symbol(fallible)) {
+        return value_struct_dependency(ref c, fallible.type);
+    }
 
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
-    if (has_struct(info) && !info.is_class && !info.is_interface && !info.is_enum) { return info.type_id; }
+    if (has_struct(info) && !info.is_class && !info.is_interface && !info.is_enum) {
+        return info.type_id;
+    }
     return 0;
 }
 
@@ -102,7 +108,9 @@ func resolve_struct_target(ref c: Compiler, target: TypeAnalysisTarget, targets:
             }
             let dependency_index: Int = type_target_index(targets, dependency_type);
             if (dependency_index >= 0) {
-                if (!resolve_struct_target(ref c, targets[dependency_index], targets, path)) { return false; }
+                if (!resolve_struct_target(ref c, targets[dependency_index], targets, path)) {
+                    return false;
+                }
                 set_module_context(ref c, target.module);
             }
         }
@@ -138,10 +146,12 @@ func find_interface_implementation(ref c: Compiler, class_info: StructInfo, inte
                 let parameter: ParamNode = parameters[parameter_index];
                 let expected_type: Int = interface_method_type_for(ref c, interface_info, parameter.type_tok, class_info.type_id);
                 let actual: TypeListNode = candidate.arg_types[parameter_index + 1];
-                if (actual.type != expected_type || actual.pass_mode != parameter.pass_mode) { matches = false; }
+                if (actual.type != expected_type || actual.pass_mode != parameter.pass_mode) {
+                    matches = false;
+                }
                 parameter_index++;
             }
-            if (matches) { return candidate; }
+            if matches { return candidate; }
         }
         i++;
     }
@@ -218,7 +228,9 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
     }
     let declared_index: Int = 0;
     while (node.interfaces is !null && declared_index < node.interfaces.length()) {
-        if (!add_interface(ref c, interfaces, node.interfaces[declared_index], node.pos)) { return false; }
+        if (!add_interface(ref c, interfaces, node.interfaces[declared_index], node.pos)) {
+            return false;
+        }
         declared_index++;
     }
     info.interfaces = interfaces;
@@ -310,7 +322,9 @@ func resolve_class_target(ref c: Compiler, target: TypeAnalysisTarget, targets: 
                     }
                     inherited_index++;
                 }
-                if (!overridden) { methods.append(method_info); }
+                if (!overridden) {
+                    methods.append(method_info);
+                }
             }
         }
         method_index++;
@@ -358,13 +372,17 @@ func analyze_declarations(ref c: Compiler) -> Void {
     let i: Int = 0;
     while (i < struct_targets.length()) {
         let target: TypeAnalysisTarget = struct_targets[i];
-        if (!resolve_struct_target(ref c, target, struct_targets, [])) { return; }
+        if (!resolve_struct_target(ref c, target, struct_targets, [])) {
+            return;
+        }
         i++;
     }
     i = 0;
     while (i < class_targets.length()) {
         let target: TypeAnalysisTarget = class_targets[i];
-        if (!resolve_class_target(ref c, target, class_targets, [])) { return; }
+        if (!resolve_class_target(ref c, target, class_targets, [])) {
+            return;
+        }
         i++;
     }
 }

@@ -8,6 +8,7 @@ import "internal/platform/errors" as platform_errors
 import "internal/runtime/string" as runtime_string
 import "internal/runtime/memory" as runtime_memory
 
+
 error Error {
     None,
     Unknown,
@@ -72,6 +73,7 @@ func __last_error() -> Error {
 }
 
 class File {
+// owns one native file handle and a small write buffer
     let handle: AnyPtr = nullptr;
     let path: String = "";
     let __last_error: Error = Error.None;
@@ -120,7 +122,9 @@ class File {
             windows.free_utf16(wide_path);
             if (!windows.is_invalid_handle(raw_handle)) {
                 self.handle = raw_handle;
-                if append_mode { windows.SetFilePointerEx(self.handle, 0L, nullptr, windows.FILE_END); }
+                if append_mode {
+                    windows.SetFilePointerEx(self.handle, 0L, nullptr, windows.FILE_END);
+                }
             } else {
                 self.__last_error = __last_error();
             }
@@ -165,8 +169,11 @@ class File {
     }
 
     func read_all() -> String? {
+    // read from the current position until EOF, the returned bytes must be valid UTF-8
         if (self.handle is nullptr) {
-            if (self.__last_error == Error.None) { throw Error.InvalidState; }
+            if (self.__last_error == Error.None) {
+                throw Error.InvalidState;
+            }
             throw self.__last_error;
         }
 
@@ -199,7 +206,9 @@ class File {
         }
         let size: IntSize = posix.ftell(self.handle);
         if (size < IntSize(0) || size > IntSize(2147483647)) {
-            if (size > IntSize(2147483647)) { throw Error.FileTooLarge; }
+            if (size > IntSize(2147483647)) {
+                throw Error.FileTooLarge;
+            }
             self.__last_error = __last_error();
             throw self.__last_error;
         }
@@ -221,11 +230,16 @@ class File {
     }
 
     func write_all(content: String) -> Int? {
+    // write the whole string or return the first platform error
         if (self.handle is nullptr) {
-            if (self.__last_error == Error.None) { throw Error.InvalidState; }
+            if (self.__last_error == Error.None) {
+                throw Error.InvalidState;
+            }
             throw self.__last_error;
         }
-        if (!self.__flush_write_buffer()) { throw self.__last_error; }
+        if (!self.__flush_write_buffer()) {
+            throw self.__last_error;
+        }
         let length: Long = content.length();
         if (sys.OS == sys.Os.Windows) {
             let bytes_written: Int = 0;
@@ -251,10 +265,14 @@ class File {
 
     func write_bytes(content: Vector(Byte)) -> Int? {
         if (self.handle is nullptr) {
-            if (self.__last_error == Error.None) { throw Error.InvalidState; }
+            if (self.__last_error == Error.None) {
+                throw Error.InvalidState;
+            }
             throw self.__last_error;
         }
-        if (!self.__flush_write_buffer()) { throw self.__last_error; }
+        if (!self.__flush_write_buffer()) {
+            throw self.__last_error;
+        }
         let length: Int = content.length();
         if (length == 0) { return 0; }
         let data: AnyPtr = ref content[0];
@@ -284,7 +302,9 @@ class File {
         if (self.handle is nullptr) { return; }
         let length: Long = content.length();
         if (sys.OS == sys.Os.Windows) {
-            if (length <= 0L) { return; }
+            if (length <= 0L) {
+                return;
+            }
             if (self.write_buffer is null) {
                 self.write_buffer = runtime_string.alloc(65536L);
                 if (self.write_buffer is null) {
@@ -299,7 +319,9 @@ class File {
             let source_idx: Int = 0;
             let content_len: Int = Int(length);
             while (source_idx < content_len) {
-                if (self.write_buffer_len == 65536 && !self.__flush_write_buffer()) { return; }
+                if (self.write_buffer_len == 65536 && !self.__flush_write_buffer()) {
+                    return;
+                }
                 let available: Int = 65536 - self.write_buffer_len;
                 let count: Int = content_len - source_idx;
                 if (count > available) { count = available; }
@@ -322,6 +344,7 @@ class File {
     }
 
     func close_checked() -> Void? {
+    // flush pending data and report close failures to the caller
         let pending_error: Error = self.__last_error;
         if (self.handle is !nullptr) {
             if (!self.__flush_write_buffer() && pending_error == Error.None) {
@@ -359,20 +382,29 @@ class File {
 }
 
 func open(path: String) -> File? {
+// open an existing file for reading
     let result: File = File(path, "rb");
-    if (!result.is_open()) { throw result.last_error(); }
+    if (!result.is_open()) {
+        throw result.last_error();
+    }
     return result;
 }
 
 func create(path: String) -> File? {
+// create or truncate a file for writing
     let result: File = File(path, "wb");
-    if (!result.is_open()) { throw result.last_error(); }
+    if (!result.is_open()) {
+        throw result.last_error();
+    }
     return result;
 }
 
 func append(path: String) -> File? {
+// open a file for writing at its end, creating it when needed
     let result: File = File(path, "ab");
-    if (!result.is_open()) { throw result.last_error(); }
+    if (!result.is_open()) {
+        throw result.last_error();
+    }
     return result;
 }
 
@@ -394,15 +426,22 @@ func exists(path: String) -> Bool {
 }
 
 func remove(path: String) -> Void? {
-    if (!runtime_string.is_native_text(path)) { throw Error.InvalidPath; }
+// remove one file, directories are not accepted here
+    if (!runtime_string.is_native_text(path)) {
+        throw Error.InvalidPath;
+    }
     if (sys.OS == sys.Os.Windows) {
         let wide_path: AnyPtr = windows.utf8_to_utf16(path);
         if (wide_path is nullptr) { throw __last_error(); }
         let removed: Bool = windows.DeleteFileW(wide_path) != 0;
         windows.free_utf16(wide_path);
-        if (!removed) { throw __last_error(); }
+        if (!removed) {
+            throw __last_error();
+        }
         return;
     }
-    if (posix.remove(runtime_string.data(path)) != 0) { throw __last_error(); }
+    if (posix.remove(runtime_string.data(path)) != 0) {
+        throw __last_error();
+    }
     return;
 }

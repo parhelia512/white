@@ -1,7 +1,8 @@
-// compiler/wir/verify.wl
+// src/compiler/wir/verify.wl
 import * from "model.wl"
 import wir_value_type from "builder.wl"
 import wir_type_layouts from "layout.wl"
+
 
 func wir_type_valid(ref program: WirModule, id: WirTypeID) -> Bool {
     let index: Int = wir_id_index(UInt32(id));
@@ -77,7 +78,9 @@ func wir_check_location(ref program: WirModule, location: WirLocation, errors: V
             wir_report(errors, "instruction refers to an unknown source file");
         }
     }
-    if (location.end < location.start) { wir_report(errors, "instruction source range ends before it starts"); }
+    if (location.end < location.start) {
+        wir_report(errors, "instruction source range ends before it starts");
+    }
 }
 
 func wir_check_types(ref program: WirModule, errors: Vector(String)) -> Void {
@@ -120,7 +123,9 @@ func wir_check_types(ref program: WirModule, errors: Vector(String)) -> Void {
         }
         if (value.kind == WirTypeKind.Array && wir_type_valid(ref program, value.element)) {
             let element: WirType = program.arena.types[wir_id_index(UInt32(value.element))];
-            if (element.kind == WirTypeKind.VoidType) { wir_report(errors, "array type has a Void element"); }
+            if (element.kind == WirTypeKind.VoidType) {
+                wir_report(errors, "array type has a Void element");
+            }
         }
         if (value.kind == WirTypeKind.Function && !wir_type_valid(ref program, value.result)) {
             wir_report(errors, "function type has an unknown return type");
@@ -133,9 +138,13 @@ func wir_check_types(ref program: WirModule, errors: Vector(String)) -> Void {
 }
 
 func wir_check_sized_type(ref program: WirModule, type_id: WirTypeID, states: Vector(Int), errors: Vector(String)) -> Void {
-    if (!wir_type_valid(ref program, type_id)) { return; }
+    if (!wir_type_valid(ref program, type_id)) {
+        return;
+    }
     let index: Int = wir_id_index(UInt32(type_id));
-    if (states[index] == 2) { return; }
+    if (states[index] == 2) {
+        return;
+    }
     if (states[index] == 1) {
         wir_report(errors, "aggregate type contains itself by value");
         return;
@@ -211,7 +220,9 @@ func wir_check_values(ref program: WirModule, errors: Vector(String)) -> Void {
             }
         } else if (value.kind == WirValueKind.BlockParameter) {
             let block_id: WirBlockID = WirBlockID(value.owner);
-            if (!wir_block_valid(ref program, block_id)) { wir_report(errors, "block parameter belongs to an unknown block"); }
+            if (!wir_block_valid(ref program, block_id)) {
+                wir_report(errors, "block parameter belongs to an unknown block");
+            }
         } else if (value.kind == WirValueKind.Instruction) {
             let instruction_id: WirInstID = WirInstID(value.owner);
             if (!wir_inst_valid(ref program, instruction_id)) {
@@ -250,7 +261,9 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
             constant.target != NO_WIR_VALUE || constant.addend != 0L) {
             wir_report(errors, "zero constant contains unused payload data");
         }
-        if (!wir_type_can_zero(ref program, constant.type_id)) { wir_report(errors, "zero constant has an unsupported type"); }
+        if (!wir_type_can_zero(ref program, constant.type_id)) {
+            wir_report(errors, "zero constant has an unsupported type");
+        }
     } else if (constant.kind == WirConstKind.Aggregate) {
         if (constant.bytes.length() != 0 || constant.target != NO_WIR_VALUE || constant.addend != 0L) {
             wir_report(errors, "aggregate constant contains unused payload data");
@@ -275,9 +288,15 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
             } else {
                 let element: WirValue = program.arena.values[wir_id_index(UInt32(element_id))];
                 let expected_type: WirTypeID = NO_WIR_TYPE;
-                if (type.kind == WirTypeKind.Struct && i < type.fields.length()) { expected_type = type.fields[i]; }
-                else if (type.kind == WirTypeKind.Array && UIntSize(i) < type.length) { expected_type = type.element; }
-                if (expected_type != NO_WIR_TYPE && element.type_id != expected_type) { wir_report(errors, "aggregate constant element has the wrong type"); }
+                if (type.kind == WirTypeKind.Struct && i < type.fields.length()) {
+                    expected_type = type.fields[i];
+                }
+                else if (type.kind == WirTypeKind.Array && UIntSize(i) < type.length) {
+                    expected_type = type.element;
+                }
+                if (expected_type != NO_WIR_TYPE && element.type_id != expected_type) {
+                    wir_report(errors, "aggregate constant element has the wrong type");
+                }
                 if (element.kind == WirValueKind.Constant && wir_const_valid(ref program, WirConstID(element.owner))) {
                     wir_check_constant(ref program, WirConstID(element.owner), states, errors);
                 }
@@ -292,8 +311,12 @@ func wir_check_constant(ref program: WirModule, constant_id: WirConstID, states:
             wir_report(errors, "byte constant does not have an array type");
         } else {
             let element: WirType = program.arena.types[wir_id_index(UInt32(type.element))];
-            if (element.kind != WirTypeKind.UnsignedInt || element.bits != 8) { wir_report(errors, "byte constant element type is not u8"); }
-            if (type.length != UIntSize(constant.bytes.length())) { wir_report(errors, "byte constant length does not match its array type"); }
+            if (element.kind != WirTypeKind.UnsignedInt || element.bits != 8) {
+                wir_report(errors, "byte constant element type is not u8");
+            }
+            if (type.length != UIntSize(constant.bytes.length())) {
+                wir_report(errors, "byte constant length does not match its array type");
+            }
         }
     } else if (constant.kind == WirConstKind.Address) {
         if (constant.elements.length() != 0 || constant.bytes.length() != 0) {
@@ -339,14 +362,18 @@ func wir_check_constants(ref program: WirModule, errors: Vector(String)) -> Void
     i = 0;
     while (i < program.arena.constants.length()) {
         let constant_id: WirConstID = WirConstID(UInt32(i + 1));
-        if (owners[i] != 1) { wir_report(errors, "constant does not have exactly one value definition"); }
+        if (owners[i] != 1) {
+            wir_report(errors, "constant does not have exactly one value definition");
+        }
         wir_check_constant(ref program, constant_id, states, errors);
         i++;
     }
 }
 
 func wir_same_operand_types(ref program: WirModule, instruction: WirInstruction) -> Bool {
-    if (instruction.operands.length() != 2 || !wir_value_valid(ref program, instruction.operands[0]) || !wir_value_valid(ref program, instruction.operands[1])) { return false; }
+    if (instruction.operands.length() != 2 || !wir_value_valid(ref program, instruction.operands[0]) || !wir_value_valid(ref program, instruction.operands[1])) {
+        return false;
+    }
     let left: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
     let right: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
     return left == right && left == instruction.type_id;
@@ -359,7 +386,9 @@ func wir_check_binary(ref program: WirModule, instruction: WirInstruction, error
     }
     let integer: Bool = wir_is_integer_type(ref program, instruction.type_id);
     let floating: Bool = wir_is_float_type(ref program, instruction.type_id);
-    if (!integer && !floating) { wir_report(errors, "binary instruction requires a numeric type"); }
+    if (!integer && !floating) {
+        wir_report(errors, "binary instruction requires a numeric type");
+    }
 }
 
 func wir_check_unary(ref program: WirModule, instruction: WirInstruction, errors: Vector(String)) -> Void {
@@ -367,7 +396,9 @@ func wir_check_unary(ref program: WirModule, instruction: WirInstruction, errors
         wir_report(errors, "unary instruction requires one valid operand");
         return;
     }
-    if (wir_value_type(ref program, instruction.operands[0]) != instruction.type_id) { wir_report(errors, "unary instruction operand does not match its type"); }
+    if (wir_value_type(ref program, instruction.operands[0]) != instruction.type_id) {
+        wir_report(errors, "unary instruction operand does not match its type");
+    }
 }
 
 func wir_numeric_kind(kind: WirTypeKind) -> Bool {
@@ -388,23 +419,47 @@ func wir_is_cast(opcode: WirOpcode) -> Bool {
 }
 
 func wir_cast_matches(ref program: WirModule, opcode: WirOpcode, source_id: WirTypeID, target_id: WirTypeID) -> Bool {
-    if (!wir_type_valid(ref program, source_id) || !wir_type_valid(ref program, target_id) || source_id == target_id) { return false; }
+    if (!wir_type_valid(ref program, source_id) || !wir_type_valid(ref program, target_id) || source_id == target_id) {
+        return false;
+    }
     let source: WirType = program.arena.types[wir_id_index(UInt32(source_id))];
     let target: WirType = program.arena.types[wir_id_index(UInt32(target_id))];
     let source_integer: Bool = source.kind == WirTypeKind.BoolType || source.kind == WirTypeKind.SignedInt || source.kind == WirTypeKind.UnsignedInt;
     let target_integer: Bool = target.kind == WirTypeKind.BoolType || target.kind == WirTypeKind.SignedInt || target.kind == WirTypeKind.UnsignedInt;
 
-    if (opcode == WirOpcode.Truncate) { return source_integer && target_integer && source.bits > target.bits; }
-    if (opcode == WirOpcode.SignExtend) { return source.kind == WirTypeKind.SignedInt && target_integer && source.bits < target.bits; }
-    if (opcode == WirOpcode.ZeroExtend) { return source_integer && source.kind != WirTypeKind.SignedInt && target_integer && source.bits < target.bits; }
-    if (opcode == WirOpcode.FloatExtend) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits < target.bits; }
-    if (opcode == WirOpcode.FloatTruncate) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits > target.bits; }
-    if (opcode == WirOpcode.SignedIntToFloat) { return source.kind == WirTypeKind.SignedInt && target.kind == WirTypeKind.FloatType; }
-    if (opcode == WirOpcode.UnsignedIntToFloat) { return source.kind == WirTypeKind.UnsignedInt && target.kind == WirTypeKind.FloatType; }
-    if (opcode == WirOpcode.FloatToSignedInt) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.SignedInt; }
-    if (opcode == WirOpcode.FloatToUnsignedInt) { return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.UnsignedInt; }
-    if (opcode == WirOpcode.PointerToInt) { return source.kind == WirTypeKind.Pointer && target_integer; }
-    if (opcode == WirOpcode.IntToPointer) { return source_integer && target.kind == WirTypeKind.Pointer; }
+    if (opcode == WirOpcode.Truncate) {
+        return source_integer && target_integer && source.bits > target.bits;
+    }
+    if (opcode == WirOpcode.SignExtend) {
+        return source.kind == WirTypeKind.SignedInt && target_integer && source.bits < target.bits;
+    }
+    if (opcode == WirOpcode.ZeroExtend) {
+        return source_integer && source.kind != WirTypeKind.SignedInt && target_integer && source.bits < target.bits;
+    }
+    if (opcode == WirOpcode.FloatExtend) {
+        return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits < target.bits;
+    }
+    if (opcode == WirOpcode.FloatTruncate) {
+        return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.FloatType && source.bits > target.bits;
+    }
+    if (opcode == WirOpcode.SignedIntToFloat) {
+        return source.kind == WirTypeKind.SignedInt && target.kind == WirTypeKind.FloatType;
+    }
+    if (opcode == WirOpcode.UnsignedIntToFloat) {
+        return source.kind == WirTypeKind.UnsignedInt && target.kind == WirTypeKind.FloatType;
+    }
+    if (opcode == WirOpcode.FloatToSignedInt) {
+        return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.SignedInt;
+    }
+    if (opcode == WirOpcode.FloatToUnsignedInt) {
+        return source.kind == WirTypeKind.FloatType && target.kind == WirTypeKind.UnsignedInt;
+    }
+    if (opcode == WirOpcode.PointerToInt) {
+        return source.kind == WirTypeKind.Pointer && target_integer;
+    }
+    if (opcode == WirOpcode.IntToPointer) {
+        return source_integer && target.kind == WirTypeKind.Pointer;
+    }
     if (opcode != WirOpcode.Bitcast) { return false; }
     if (source.kind == WirTypeKind.Pointer && target.kind == WirTypeKind.Pointer) { return true; }
     return wir_numeric_kind(source.kind) && wir_numeric_kind(target.kind) && source.bits == target.bits;
@@ -430,7 +485,9 @@ func wir_float_comparison(opcode: WirOpcode) -> Bool {
 }
 
 func wir_check_no_result(ref program: WirModule, instruction: WirInstruction, errors: Vector(String)) -> Void {
-    if (instruction.type_id != program.void_type || instruction.result != NO_WIR_VALUE) { wir_report(errors, "side-effect instruction produces a value"); }
+    if (instruction.type_id != program.void_type || instruction.result != NO_WIR_VALUE) {
+        wir_report(errors, "side-effect instruction produces a value");
+    }
 }
 
 func wir_atomic_load_order(order: WirMemoryOrder) -> Bool {
@@ -472,7 +529,9 @@ func wir_check_atomic_pointer(ref program: WirModule, instruction: WirInstructio
 func wir_constant_index(ref program: WirModule, value_id: WirValueID) -> Int {
     if (!wir_value_valid(ref program, value_id)) { return -1; }
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
-    if (value.kind != WirValueKind.Integer || !wir_is_integer_type(ref program, value.type_id)) { return -1; }
+    if (value.kind != WirValueKind.Integer || !wir_is_integer_type(ref program, value.type_id)) {
+        return -1;
+    }
     return Int(value.integer);
 }
 
@@ -584,7 +643,9 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
 
     let i: Int = 0;
     while (i < instruction.operands.length()) {
-        if (!wir_value_valid(ref program, instruction.operands[i])) { wir_report(errors, "instruction uses an unknown value"); }
+        if (!wir_value_valid(ref program, instruction.operands[i])) {
+            wir_report(errors, "instruction uses an unknown value");
+        }
         i++;
     }
     i = 0;
@@ -618,7 +679,9 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
     }
 
     if (instruction.result == NO_WIR_VALUE) {
-        if (instruction.type_id != program.void_type) { wir_report(errors, "value-producing instruction has no result"); }
+        if (instruction.type_id != program.void_type) {
+            wir_report(errors, "value-producing instruction has no result");
+        }
     } else if (!wir_value_valid(ref program, instruction.result)) {
         wir_report(errors, "instruction has an unknown result value");
     } else if (program.arena.values[wir_id_index(UInt32(instruction.result))].type_id != instruction.type_id) {
@@ -626,21 +689,31 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
     }
 
     let opcode: WirOpcode = instruction.opcode;
-    if (opcode != WirOpcode.Call && instruction.call_type != NO_WIR_TYPE) { wir_report(errors, "non-call instruction contains a call signature"); }
-    if (!wir_is_terminator(opcode) && instruction.edges.length() != 0) { wir_report(errors, "non-terminator instruction contains control-flow edges"); }
+    if (opcode != WirOpcode.Call && instruction.call_type != NO_WIR_TYPE) {
+        wir_report(errors, "non-call instruction contains a call signature");
+    }
+    if (!wir_is_terminator(opcode) && instruction.edges.length() != 0) {
+        wir_report(errors, "non-terminator instruction contains control-flow edges");
+    }
     if (opcode == WirOpcode.Invalid) {
         wir_report(errors, "instruction has an invalid opcode");
     } else if (opcode == WirOpcode.Add || opcode == WirOpcode.Subtract || opcode == WirOpcode.Multiply) {
         wir_check_binary(ref program, instruction, errors);
     } else if (opcode == WirOpcode.SignedDivide || opcode == WirOpcode.SignedRemainder || opcode == WirOpcode.SignedShiftRight) {
         wir_check_binary(ref program, instruction, errors);
-        if (wir_type_valid(ref program, instruction.type_id) && program.arena.types[wir_id_index(UInt32(instruction.type_id))].kind != WirTypeKind.SignedInt) { wir_report(errors, "signed instruction requires a signed integer type"); }
+        if (wir_type_valid(ref program, instruction.type_id) && program.arena.types[wir_id_index(UInt32(instruction.type_id))].kind != WirTypeKind.SignedInt) {
+            wir_report(errors, "signed instruction requires a signed integer type");
+        }
     } else if (opcode == WirOpcode.UnsignedDivide || opcode == WirOpcode.UnsignedRemainder || opcode == WirOpcode.UnsignedShiftRight) {
         wir_check_binary(ref program, instruction, errors);
-        if (wir_type_valid(ref program, instruction.type_id) && program.arena.types[wir_id_index(UInt32(instruction.type_id))].kind != WirTypeKind.UnsignedInt) { wir_report(errors, "unsigned instruction requires an unsigned integer type"); }
+        if (wir_type_valid(ref program, instruction.type_id) && program.arena.types[wir_id_index(UInt32(instruction.type_id))].kind != WirTypeKind.UnsignedInt) {
+            wir_report(errors, "unsigned instruction requires an unsigned integer type");
+        }
     } else if (opcode == WirOpcode.FloatDivide || opcode == WirOpcode.FloatRemainder) {
         wir_check_binary(ref program, instruction, errors);
-        if (!wir_is_float_type(ref program, instruction.type_id)) { wir_report(errors, "floating-point instruction requires a floating-point type"); }
+        if (!wir_is_float_type(ref program, instruction.type_id)) {
+            wir_report(errors, "floating-point instruction requires a floating-point type");
+        }
     } else if (opcode == WirOpcode.BitAnd || opcode == WirOpcode.BitOr || opcode == WirOpcode.BitXor) {
         if (instruction.type_id == program.bool_type) {
             if (instruction.operands.length() != 2 || !wir_value_valid(ref program, instruction.operands[0]) || !wir_value_valid(ref program, instruction.operands[1])) {
@@ -650,31 +723,47 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
             }
         } else {
             wir_check_binary(ref program, instruction, errors);
-            if (!wir_is_integer_type(ref program, instruction.type_id)) { wir_report(errors, "bitwise instruction requires an integer type"); }
+            if (!wir_is_integer_type(ref program, instruction.type_id)) {
+                wir_report(errors, "bitwise instruction requires an integer type");
+            }
         }
     } else if (opcode == WirOpcode.ShiftLeft) {
         wir_check_binary(ref program, instruction, errors);
-        if (!wir_is_integer_type(ref program, instruction.type_id)) { wir_report(errors, "shift instruction requires an integer type"); }
+        if (!wir_is_integer_type(ref program, instruction.type_id)) {
+            wir_report(errors, "shift instruction requires an integer type");
+        }
     } else if (opcode == WirOpcode.Abs) {
         wir_check_unary(ref program, instruction, errors);
-        if (!wir_type_is(ref program, instruction.type_id, WirTypeKind.SignedInt)) { wir_report(errors, "integer absolute value requires a signed integer type"); }
+        if (!wir_type_is(ref program, instruction.type_id, WirTypeKind.SignedInt)) {
+            wir_report(errors, "integer absolute value requires a signed integer type");
+        }
     } else if (opcode == WirOpcode.Negate) {
         wir_check_unary(ref program, instruction, errors);
-        if (!wir_is_integer_type(ref program, instruction.type_id)) { wir_report(errors, "integer negation requires an integer type"); }
+        if (!wir_is_integer_type(ref program, instruction.type_id)) {
+            wir_report(errors, "integer negation requires an integer type");
+        }
     } else if (opcode == WirOpcode.FloatNegate) {
         wir_check_unary(ref program, instruction, errors);
-        if (!wir_is_float_type(ref program, instruction.type_id)) { wir_report(errors, "floating-point negation requires a floating-point type"); }
+        if (!wir_is_float_type(ref program, instruction.type_id)) {
+            wir_report(errors, "floating-point negation requires a floating-point type");
+        }
     } else if (opcode == WirOpcode.Not) {
         wir_check_unary(ref program, instruction, errors);
-        if (!wir_is_integer_type(ref program, instruction.type_id) && instruction.type_id != program.bool_type) { wir_report(errors, "not requires a Bool or integer type"); }
+        if (!wir_is_integer_type(ref program, instruction.type_id) && instruction.type_id != program.bool_type) {
+            wir_report(errors, "not requires a Bool or integer type");
+        }
     } else if (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual || wir_signed_comparison(opcode) || wir_unsigned_comparison(opcode) || wir_float_comparison(opcode)) {
         if (instruction.operands.length() != 2 || !wir_value_valid(ref program, instruction.operands[0]) || !wir_value_valid(ref program, instruction.operands[1])) {
             wir_report(errors, "comparison requires two valid operands");
         } else {
             let left: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
             let right: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
-            if (left != right) { wir_report(errors, "comparison operands have different types"); }
-            if (instruction.type_id != program.bool_type) { wir_report(errors, "comparison result is not Bool"); }
+            if (left != right) {
+                wir_report(errors, "comparison operands have different types");
+            }
+            if (instruction.type_id != program.bool_type) {
+                wir_report(errors, "comparison result is not Bool");
+            }
             if (left == right && (opcode == WirOpcode.Equal || opcode == WirOpcode.NotEqual) && !wir_equality_type(ref program, left)) {
                 wir_report(errors, "equality comparison requires a scalar or pointer type");
             }
@@ -695,11 +784,17 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
             let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
             if (wir_func_valid(ref program, block.function)) {
                 let function: WirFunction = program.arena.functions[wir_id_index(UInt32(block.function))];
-                if (function.entry != block_id) { wir_report(errors, "stack allocation is outside the function entry block"); }
+                if (function.entry != block_id) {
+                    wir_report(errors, "stack allocation is outside the function entry block");
+                }
             }
             let pointer: WirType = program.arena.types[wir_id_index(UInt32(instruction.type_id))];
-            if (pointer.element == program.void_type) { wir_report(errors, "stack allocation has no storage type"); }
-            else if (!wir_type_valid(ref program, pointer.element) || !layouts[wir_id_index(UInt32(pointer.element))].valid) { wir_report(errors, "stack allocation has an unsized storage type"); }
+            if (pointer.element == program.void_type) {
+                wir_report(errors, "stack allocation has no storage type");
+            }
+            else if (!wir_type_valid(ref program, pointer.element) || !layouts[wir_id_index(UInt32(pointer.element))].valid) {
+                wir_report(errors, "stack allocation has an unsized storage type");
+            }
         }
     } else if (opcode == WirOpcode.Load) {
         if (instruction.operands.length() != 1 || !wir_value_valid(ref program, instruction.operands[0])) {
@@ -721,10 +816,14 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
             let pointer_type_id: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id;
             if (!wir_is_pointer_type(ref program, pointer_type_id) || program.arena.types[wir_id_index(UInt32(pointer_type_id))].element != value_type_id) {
                 let expected_type_id: WirTypeID = NO_WIR_TYPE;
-                if (wir_is_pointer_type(ref program, pointer_type_id)) { expected_type_id = program.arena.types[wir_id_index(UInt32(pointer_type_id))].element; }
+                if (wir_is_pointer_type(ref program, pointer_type_id)) {
+                    expected_type_id = program.arena.types[wir_id_index(UInt32(pointer_type_id))].element;
+                }
                 let function_name: String = "<unknown>";
                 let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
-                if (wir_func_valid(ref program, block.function)) { function_name = program.arena.functions[wir_id_index(UInt32(block.function))].name; }
+                if (wir_func_valid(ref program, block.function)) {
+                    function_name = program.arena.functions[wir_id_index(UInt32(block.function))].name;
+                }
                 wir_report(errors, "stored value type " + UInt32(value_type_id) + " does not match pointer element type " + UInt32(expected_type_id) + " in function '" + function_name + "'");
             }
         }
@@ -733,9 +832,15 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
             wir_report(errors, "atomic load requires one address and one result");
         }
         let element: WirTypeID = wir_check_atomic_pointer(ref program, instruction, 0, errors);
-        if (element != NO_WIR_TYPE && instruction.type_id != element) { wir_report(errors, "atomic load result does not match the pointer element type"); }
-        if (!wir_atomic_load_order(instruction.memory_order)) { wir_report(errors, "atomic load has an invalid memory order"); }
-        if (instruction.atomic_op != WirAtomicOp.None) { wir_report(errors, "atomic load contains an RMW operation"); }
+        if (element != NO_WIR_TYPE && instruction.type_id != element) {
+            wir_report(errors, "atomic load result does not match the pointer element type");
+        }
+        if (!wir_atomic_load_order(instruction.memory_order)) {
+            wir_report(errors, "atomic load has an invalid memory order");
+        }
+        if (instruction.atomic_op != WirAtomicOp.None) {
+            wir_report(errors, "atomic load contains an RMW operation");
+        }
     } else if (opcode == WirOpcode.AtomicStore) {
         wir_check_no_result(ref program, instruction, errors);
         if (instruction.operands.length() != 2 || instruction.edges.length() != 0) {
@@ -745,8 +850,12 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
         if (element != NO_WIR_TYPE && (!wir_value_valid(ref program, instruction.operands[0]) || wir_value_type(ref program, instruction.operands[0]) != element)) {
             wir_report(errors, "atomic store value does not match the pointer element type");
         }
-        if (!wir_atomic_store_order(instruction.memory_order)) { wir_report(errors, "atomic store has an invalid memory order"); }
-        if (instruction.atomic_op != WirAtomicOp.None) { wir_report(errors, "atomic store contains an RMW operation"); }
+        if (!wir_atomic_store_order(instruction.memory_order)) {
+            wir_report(errors, "atomic store has an invalid memory order");
+        }
+        if (instruction.atomic_op != WirAtomicOp.None) {
+            wir_report(errors, "atomic store contains an RMW operation");
+        }
     } else if (opcode == WirOpcode.AtomicRmw) {
         if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || instruction.result == NO_WIR_VALUE) {
             wir_report(errors, "atomic RMW requires an address, a value, and a result");
@@ -755,8 +864,12 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
         if (element != NO_WIR_TYPE && (!wir_value_valid(ref program, instruction.operands[1]) || wir_value_type(ref program, instruction.operands[1]) != element || instruction.type_id != element)) {
             wir_report(errors, "atomic RMW value and result must match the pointer element type");
         }
-        if (!wir_atomic_rmw_op(instruction.atomic_op)) { wir_report(errors, "atomic RMW has an invalid operation"); }
-        if (!wir_atomic_rmw_order(instruction.memory_order)) { wir_report(errors, "atomic RMW has an invalid memory order"); }
+        if (!wir_atomic_rmw_op(instruction.atomic_op)) {
+            wir_report(errors, "atomic RMW has an invalid operation");
+        }
+        if (!wir_atomic_rmw_order(instruction.memory_order)) {
+            wir_report(errors, "atomic RMW has an invalid memory order");
+        }
     } else if (opcode == WirOpcode.Field) {
         wir_check_field(ref program, instruction, false, errors);
     } else if (opcode == WirOpcode.FieldAddress) {
@@ -776,7 +889,9 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
             wir_report(errors, "cast opcode does not match its source and target types");
         }
     } else if (opcode == WirOpcode.Call) {
-        if (instruction.edges.length() != 0) { wir_report(errors, "call cannot contain control-flow edges"); }
+        if (instruction.edges.length() != 0) {
+            wir_report(errors, "call cannot contain control-flow edges");
+        }
         if (instruction.operands.length() == 0 || !wir_value_valid(ref program, instruction.operands[0])) {
             wir_report(errors, "call has no valid callee");
         } else {
@@ -799,7 +914,9 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
                     let caller_name: String = "unknown function";
                     if (wir_block_valid(ref program, block_id)) {
                         let caller: WirFuncID = program.arena.blocks[wir_id_index(UInt32(block_id))].function;
-                        if (wir_func_valid(ref program, caller)) { caller_name = "function '" + program.arena.functions[wir_id_index(UInt32(caller))].name + "'"; }
+                        if (wir_func_valid(ref program, caller)) {
+                            caller_name = "function '" + program.arena.functions[wir_id_index(UInt32(caller))].name + "'";
+                        }
                     }
                     wir_report(errors, callee_name + " in " + caller_name + " expects " + signature.parameters.length() + " arguments, got " + argument_count);
                 }
@@ -817,19 +934,27 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
                             let expected_type: WirType = program.arena.types[wir_id_index(UInt32(signature.parameters[argument_index]))];
                             let actual_element: String = "";
                             let expected_element: String = "";
-                            if (wir_type_valid(ref program, actual_type.element)) { actual_element = program.arena.types[wir_id_index(UInt32(actual_type.element))].name; }
-                            if (wir_type_valid(ref program, expected_type.element)) { expected_element = program.arena.types[wir_id_index(UInt32(expected_type.element))].name; }
+                            if (wir_type_valid(ref program, actual_type.element)) {
+                                actual_element = program.arena.types[wir_id_index(UInt32(actual_type.element))].name;
+                            }
+                            if (wir_type_valid(ref program, expected_type.element)) {
+                                expected_element = program.arena.types[wir_id_index(UInt32(expected_type.element))].name;
+                            }
                             let caller_name: String = "unknown function";
                             if (wir_block_valid(ref program, block_id)) {
                                 let caller: WirFuncID = program.arena.blocks[wir_id_index(UInt32(block_id))].function;
-                                if (wir_func_valid(ref program, caller)) { caller_name = "function '" + program.arena.functions[wir_id_index(UInt32(caller))].name + "'"; }
+                                if (wir_func_valid(ref program, caller)) {
+                                    caller_name = "function '" + program.arena.functions[wir_id_index(UInt32(caller))].name + "'";
+                                }
                             }
                             wir_report(errors, callee_name + " argument " + argument_index + " in " + caller_name + " has WIR type " + Int(argument.type_id) + "/" + actual_element + ", expected " + Int(signature.parameters[argument_index]) + "/" + expected_element);
                         }
                     }
                     argument_index++;
                 }
-                if (instruction.type_id != signature.result) { wir_report(errors, "call result does not match the function return type"); }
+                if (instruction.type_id != signature.result) {
+                    wir_report(errors, "call result does not match the function return type");
+                }
             }
         }
     } else if (opcode == WirOpcode.Retain || opcode == WirOpcode.Release) {
@@ -841,7 +966,9 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
         }
     } else if (opcode == WirOpcode.Jump) {
         wir_check_no_result(ref program, instruction, errors);
-        if (instruction.operands.length() != 0 || instruction.edges.length() != 1 || instruction.result != NO_WIR_VALUE) { wir_report(errors, "jump has an invalid shape"); }
+        if (instruction.operands.length() != 0 || instruction.edges.length() != 1 || instruction.result != NO_WIR_VALUE) {
+            wir_report(errors, "jump has an invalid shape");
+        }
     } else if (opcode == WirOpcode.Branch) {
         wir_check_no_result(ref program, instruction, errors);
         if (instruction.operands.length() != 1 || instruction.edges.length() != 2 || instruction.result != NO_WIR_VALUE) {
@@ -858,9 +985,13 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
         }
         let function: WirFunction = program.arena.functions[wir_id_index(UInt32(block.function))];
         let function_type: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
-        if (instruction.edges.length() != 0) { wir_report(errors, "return cannot contain control-flow edges"); }
+        if (instruction.edges.length() != 0) {
+            wir_report(errors, "return cannot contain control-flow edges");
+        }
         if (function_type.result == program.void_type) {
-            if (instruction.operands.length() != 0) { wir_report(errors, "Void function returns a value"); }
+            if (instruction.operands.length() != 0) {
+                wir_report(errors, "Void function returns a value");
+            }
         } else if (instruction.operands.length() != 1) {
             wir_report(errors, "non-Void function does not return one value");
         } else if (wir_value_valid(ref program, instruction.operands[0]) && program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id != function_type.result) {
@@ -868,18 +999,39 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
         }
     } else if (opcode == WirOpcode.Trap) {
         wir_check_no_result(ref program, instruction, errors);
-        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) { wir_report(errors, "trap instruction has an invalid shape"); }
+        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) {
+            wir_report(errors, "trap instruction has an invalid shape");
+        }
     } else if (opcode == WirOpcode.Unreachable) {
         wir_check_no_result(ref program, instruction, errors);
-        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) { wir_report(errors, "unreachable instruction has an invalid shape"); }
+        if (instruction.operands.length() != 0 || instruction.edges.length() != 0 || instruction.result != NO_WIR_VALUE) {
+            wir_report(errors, "unreachable instruction has an invalid shape");
+        }
     } else if (opcode == WirOpcode.NullCheck) {
         wir_check_no_result(ref program, instruction, errors);
-        if (instruction.operands.length() != 1 || instruction.edges.length() != 0 || !wir_value_valid(ref program, instruction.operands[0]) || !wir_is_pointer_type(ref program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id)) {
+        let bad_null_check: Bool = instruction.operands.length() != 1 ||
+                                   instruction.edges.length() != 0 ||
+                                   !wir_value_valid(ref program, instruction.operands[0]);
+        if (!bad_null_check) {
+            let pointer_type: WirTypeID = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id;
+            bad_null_check = !wir_is_pointer_type(ref program, pointer_type);
+        }
+        if bad_null_check {
             wir_report(errors, "null check requires one pointer operand");
         }
     } else if (opcode == WirOpcode.BoundsCheck) {
         wir_check_no_result(ref program, instruction, errors);
-        if (instruction.operands.length() != 2 || instruction.edges.length() != 0 || !wir_value_valid(ref program, instruction.operands[0]) || !wir_value_valid(ref program, instruction.operands[1]) || !wir_is_integer_type(ref program, program.arena.values[wir_id_index(UInt32(instruction.operands[0]))].type_id) || !wir_is_integer_type(ref program, program.arena.values[wir_id_index(UInt32(instruction.operands[1]))].type_id)) {
+        let bad_bounds_check: Bool = instruction.operands.length() != 2 ||
+                                     instruction.edges.length() != 0 ||
+                                     !wir_value_valid(ref program, instruction.operands[0]) ||
+                                     !wir_value_valid(ref program, instruction.operands[1]);
+        if (!bad_bounds_check) {
+            let index_type: WirTypeID = wir_value_type(ref program, instruction.operands[0]);
+            let length_type: WirTypeID = wir_value_type(ref program, instruction.operands[1]);
+            bad_bounds_check = !wir_is_integer_type(ref program, index_type) ||
+                               !wir_is_integer_type(ref program, length_type);
+        }
+        if bad_bounds_check {
             wir_report(errors, "bounds check requires integer index and length operands");
         } else if (wir_value_type(ref program, instruction.operands[0]) != wir_value_type(ref program, instruction.operands[1])) {
             wir_report(errors, "bounds check operands have different types");
@@ -890,13 +1042,18 @@ func wir_check_instruction(ref program: WirModule, instruction_id: WirInstID, bl
 func wir_check_functions(ref program: WirModule, layouts: Vector(WirTypeLayout), errors: Vector(String)) -> Void {
     let seen_instructions: Vector(Bool) = [];
     let i: Int = 0;
-    while (i < program.arena.instructions.length()) { seen_instructions.append(false); i++; }
+    while (i < program.arena.instructions.length()) {
+        seen_instructions.append(false);
+        i++;
+    }
 
     i = 0;
     while (i < program.arena.functions.length()) {
         let function_id: WirFuncID = WirFuncID(UInt32(i + 1));
         let function: WirFunction = program.arena.functions[i];
-        if (function.name.length() == 0) { wir_report(errors, "function has no name"); }
+        if (function.name.length() == 0) {
+            wir_report(errors, "function has no name");
+        }
         if (!wir_type_valid(ref program, function.type_id) || program.arena.types[wir_id_index(UInt32(function.type_id))].kind != WirTypeKind.Function) {
             wir_report(errors, "function does not have a function type");
             i++;
@@ -908,30 +1065,48 @@ func wir_check_functions(ref program: WirModule, layouts: Vector(WirTypeLayout),
             wir_report(errors, "function has no address value");
         } else {
             let address: WirValue = program.arena.values[wir_id_index(UInt32(function.address))];
-            if (address.kind != WirValueKind.Function || address.owner != UInt32(function_id) || address.type_id != function.type_id) { wir_report(errors, "function address has invalid ownership metadata"); }
+            if (address.kind != WirValueKind.Function || address.owner != UInt32(function_id) || address.type_id != function.type_id) {
+                wir_report(errors, "function address has invalid ownership metadata");
+            }
         }
-        if (function.parameters.length() != function_type.parameters.length()) { wir_report(errors, "function parameter count does not match its type"); }
-        if (function.abi != function_type.abi) { wir_report(errors, "function ABI does not match its type"); }
-        if (function.linkage == WirLinkage.External && function.abi == WirABI.White) { wir_report(errors, "external function uses the White ABI"); }
-        if (function_type.variadic && function.abi != WirABI.C) { wir_report(errors, "variadic function does not use the C ABI"); }
+        if (function.parameters.length() != function_type.parameters.length()) {
+            wir_report(errors, "function parameter count does not match its type");
+        }
+        if (function.abi != function_type.abi) {
+            wir_report(errors, "function ABI does not match its type");
+        }
+        if (function.linkage == WirLinkage.External && function.abi == WirABI.White) {
+            wir_report(errors, "external function uses the White ABI");
+        }
+        if (function_type.variadic && function.abi != WirABI.C) {
+            wir_report(errors, "variadic function does not use the C ABI");
+        }
         let j: Int = 0;
         while (j < function.parameters.length()) {
             if (!wir_value_valid(ref program, function.parameters[j])) {
                 wir_report(errors, "function contains an unknown parameter value");
             } else {
                 let parameter: WirValue = program.arena.values[wir_id_index(UInt32(function.parameters[j]))];
-                if (parameter.kind != WirValueKind.FunctionParameter || parameter.owner != UInt32(function_id) || parameter.index != j) { wir_report(errors, "function parameter has invalid ownership metadata"); }
-                if (j < function_type.parameters.length() && parameter.type_id != function_type.parameters[j]) { wir_report(errors, "function parameter type does not match its signature"); }
+                if (parameter.kind != WirValueKind.FunctionParameter || parameter.owner != UInt32(function_id) || parameter.index != j) {
+                    wir_report(errors, "function parameter has invalid ownership metadata");
+                }
+                if (j < function_type.parameters.length() && parameter.type_id != function_type.parameters[j]) {
+                    wir_report(errors, "function parameter type does not match its signature");
+                }
             }
             j++;
         }
 
         if (function.linkage == WirLinkage.External) {
-            if (function.blocks.length() != 0 || function.entry != NO_WIR_BLOCK) { wir_report(errors, "external function contains a body"); }
+            if (function.blocks.length() != 0 || function.entry != NO_WIR_BLOCK) {
+                wir_report(errors, "external function contains a body");
+            }
             i++;
             continue;
         }
-        if (function.blocks.length() == 0 || function.entry == NO_WIR_BLOCK) { wir_report(errors, "defined function '" + function.name + "' has no entry block"); }
+        if (function.blocks.length() == 0 || function.entry == NO_WIR_BLOCK) {
+            wir_report(errors, "defined function '" + function.name + "' has no entry block");
+        }
 
         let entry_found: Bool = false;
         j = 0;
@@ -944,8 +1119,12 @@ func wir_check_functions(ref program: WirModule, layouts: Vector(WirTypeLayout),
                 continue;
             }
             let block: WirBlock = program.arena.blocks[wir_id_index(UInt32(block_id))];
-            if (block.function != function_id) { wir_report(errors, "block belongs to a different function"); }
-            if (block.instructions.length() == 0) { wir_report(errors, "block has no terminator"); }
+            if (block.function != function_id) {
+                wir_report(errors, "block belongs to a different function");
+            }
+            if (block.instructions.length() == 0) {
+                wir_report(errors, "block has no terminator");
+            }
 
             let parameter_index: Int = 0;
             while (parameter_index < block.parameters.length()) {
@@ -954,7 +1133,9 @@ func wir_check_functions(ref program: WirModule, layouts: Vector(WirTypeLayout),
                     wir_report(errors, "block contains an unknown parameter value");
                 } else {
                     let parameter: WirValue = program.arena.values[wir_id_index(UInt32(parameter_id))];
-                    if (parameter.kind != WirValueKind.BlockParameter || parameter.owner != UInt32(block_id) || parameter.index != parameter_index) { wir_report(errors, "block parameter has invalid ownership metadata"); }
+                    if (parameter.kind != WirValueKind.BlockParameter || parameter.owner != UInt32(block_id) || parameter.index != parameter_index) {
+                        wir_report(errors, "block parameter has invalid ownership metadata");
+                    }
                 }
                 parameter_index++;
             }
@@ -968,23 +1149,33 @@ func wir_check_functions(ref program: WirModule, layouts: Vector(WirTypeLayout),
                     continue;
                 }
                 let instruction_index: Int = wir_id_index(UInt32(instruction_id));
-                if (seen_instructions[instruction_index]) { wir_report(errors, "instruction is attached to more than one block"); }
+                if (seen_instructions[instruction_index]) {
+                    wir_report(errors, "instruction is attached to more than one block");
+                }
                 seen_instructions[instruction_index] = true;
                 let terminator: Bool = wir_is_terminator(program.arena.instructions[instruction_index].opcode);
-                if (terminator && k + 1 != block.instructions.length()) { wir_report(errors, "terminator is not the last instruction in its block"); }
-                if (!terminator && k + 1 == block.instructions.length()) { wir_report(errors, "block does not end in a terminator"); }
+                if (terminator && k + 1 != block.instructions.length()) {
+                    wir_report(errors, "terminator is not the last instruction in its block");
+                }
+                if (!terminator && k + 1 == block.instructions.length()) {
+                    wir_report(errors, "block does not end in a terminator");
+                }
                 wir_check_instruction(ref program, instruction_id, block_id, layouts, errors);
                 k++;
             }
             j++;
         }
-        if (!entry_found) { wir_report(errors, "entry block is not part of function '" + function.name + "'"); }
+        if (!entry_found) {
+            wir_report(errors, "entry block is not part of function '" + function.name + "'");
+        }
         i++;
     }
 
     i = 0;
     while (i < seen_instructions.length()) {
-        if (!seen_instructions[i]) { wir_report(errors, "instruction is not attached to a block"); }
+        if (!seen_instructions[i]) {
+            wir_report(errors, "instruction is not attached to a block");
+        }
         i++;
     }
 }
@@ -994,7 +1185,9 @@ func wir_check_globals(ref program: WirModule, layouts: Vector(WirTypeLayout), e
     while (i < program.arena.globals.length()) {
         let global: WirGlobal = program.arena.globals[i];
         let global_id: WirGlobalID = WirGlobalID(UInt32(i + 1));
-        if (global.name.length() == 0) { wir_report(errors, "global has no name"); }
+        if (global.name.length() == 0) {
+            wir_report(errors, "global has no name");
+        }
         if (global.alignment < 0 || (global.alignment != 0 && (global.alignment & (global.alignment - 1)) != 0)) {
             wir_report(errors, "global alignment is not a power of two");
         }
@@ -1002,8 +1195,12 @@ func wir_check_globals(ref program: WirModule, layouts: Vector(WirTypeLayout), e
             wir_report(errors, "global has an unknown type");
         } else {
             let layout: WirTypeLayout = layouts[wir_id_index(UInt32(global.type_id))];
-            if (!layout.valid) { wir_report(errors, "global has an unsized type"); }
-            else if (global.alignment != 0 && global.alignment < layout.alignment) { wir_report(errors, "global alignment is smaller than the type alignment"); }
+            if (!layout.valid) {
+                wir_report(errors, "global has an unsized type");
+            }
+            else if (global.alignment != 0 && global.alignment < layout.alignment) {
+                wir_report(errors, "global alignment is smaller than the type alignment");
+            }
         }
         if (!wir_value_valid(ref program, global.address)) {
             wir_report(errors, "global has no address value");
@@ -1020,8 +1217,12 @@ func wir_check_globals(ref program: WirModule, layouts: Vector(WirTypeLayout), e
                 wir_report(errors, "global initializer is an unknown value");
             } else {
                 let initializer: WirValue = program.arena.values[wir_id_index(UInt32(global.initializer))];
-                if (initializer.type_id != global.type_id) { wir_report(errors, "global initializer does not match the global type"); }
-                if (!wir_is_constant_value(ref program, global.initializer)) { wir_report(errors, "global initializer is not a constant value"); }
+                if (initializer.type_id != global.type_id) {
+                    wir_report(errors, "global initializer does not match the global type");
+                }
+                if (!wir_is_constant_value(ref program, global.initializer)) {
+                    wir_report(errors, "global initializer is not a constant value");
+                }
             }
         }
         if (global.linkage == WirLinkage.External && global.initializer != NO_WIR_VALUE) {
@@ -1097,7 +1298,7 @@ func wir_block_indices(ref program: WirModule) -> Vector(Int) {
 }
 
 func wir_dominators(ref program: WirModule, function: WirFunction, indices: Vector(Int)) -> Vector(Vector(UInt64)) {
-    // intersect actual predecessor sets, 64 blocks at a time
+// intersect actual predecessor sets, 64 blocks at a time
     let count: Int = function.blocks.length();
     let entry: Int = indices[wir_id_index(UInt32(function.entry))];
     let words: Int = (count + 63) / 64;
@@ -1138,7 +1339,10 @@ func wir_dominators(ref program: WirModule, function: WirFunction, indices: Vect
         changed = false;
         i = 0;
         while (i < count) {
-            if (i == entry) { i++; continue; }
+            if (i == entry) {
+                i++;
+                continue;
+            }
             let row: Vector(UInt64) = dominators[i];
             let incoming: Vector(Int) = predecessors[i];
             let word = 0;
@@ -1187,7 +1391,10 @@ func wir_instruction_blocks(ref program: WirModule) -> Vector(WirBlockID) {
 func wir_instruction_positions(ref program: WirModule) -> Vector(Int) {
     let positions: Vector(Int) = [];
     let i: Int = 0;
-    while (i < program.arena.instructions.length()) { positions.append(-1); i++; }
+    while (i < program.arena.instructions.length()) {
+        positions.append(-1);
+        i++;
+    }
     i = 0;
     while (i < program.arena.blocks.length()) {
         let block: WirBlock = program.arena.blocks[i];
@@ -1201,10 +1408,24 @@ func wir_instruction_positions(ref program: WirModule) -> Vector(Int) {
     return positions;
 }
 
-func wir_value_in_scope(ref program: WirModule, function_id: WirFuncID, block_id: WirBlockID, instruction_id: WirInstID, value_id: WirValueID, instruction_blocks: Vector(WirBlockID), positions: Vector(Int), indices: Vector(Int), dominators: Vector(Vector(UInt64))) -> Bool {
+func wir_value_in_scope(
+    ref program: WirModule,
+    function_id: WirFuncID,
+    block_id: WirBlockID,
+    instruction_id: WirInstID,
+    value_id: WirValueID,
+    instruction_blocks: Vector(WirBlockID),
+    positions: Vector(Int),
+    indices: Vector(Int),
+    dominators: Vector(Vector(UInt64))
+) -> Bool {
     let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
-    if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.FloatValue || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.Null || value.kind == WirValueKind.Constant || value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) { return true; }
-    if (value.kind == WirValueKind.FunctionParameter) { return value.owner == UInt32(function_id); }
+    if (value.kind == WirValueKind.Integer || value.kind == WirValueKind.FloatValue || value.kind == WirValueKind.BoolValue || value.kind == WirValueKind.Null || value.kind == WirValueKind.Constant || value.kind == WirValueKind.Global || value.kind == WirValueKind.Function) {
+        return true;
+    }
+    if (value.kind == WirValueKind.FunctionParameter) {
+        return value.owner == UInt32(function_id);
+    }
 
     let definition_block: WirBlockID = NO_WIR_BLOCK;
     if (value.kind == WirValueKind.BlockParameter) {
@@ -1236,7 +1457,10 @@ func wir_check_value_scopes(ref program: WirModule, errors: Vector(String)) -> V
     while (function_index < program.arena.functions.length()) {
         let function_id: WirFuncID = WirFuncID(UInt32(function_index + 1));
         let function: WirFunction = program.arena.functions[function_index];
-        if (function.linkage == WirLinkage.External) { function_index++; continue; }
+        if (function.linkage == WirLinkage.External) {
+            function_index++;
+            continue;
+        }
         let dominators: Vector(Vector(UInt64)) = wir_dominators(ref program, function, indices);
         let block_index: Int = 0;
         while (block_index < function.blocks.length()) {
@@ -1274,23 +1498,42 @@ func wir_check_value_scopes(ref program: WirModule, errors: Vector(String)) -> V
 }
 
 func verify_wir(program: WirModule, verbose: Bool = false) -> Vector(String) {
+// verification runs after construction and after tested transforms in verbose builds
     let errors: Vector(String) = [];
-    if (program.target.length() == 0) { wir_report(errors, "module has no target triple"); }
-    if (program.pointer_bits != 32 && program.pointer_bits != 64) { wir_report(errors, "module has an unsupported pointer width"); }
-    if (!program.data_layout.valid) { wir_report(errors, "module has no data layout for its target"); }
-    else if (program.data_layout.pointer_bits != program.pointer_bits) { wir_report(errors, "module pointer width does not match its data layout"); }
-    if (!wir_type_valid(ref program, program.void_type) || program.arena.types[wir_id_index(UInt32(program.void_type))].kind != WirTypeKind.VoidType) { wir_report(errors, "module has no canonical Void type"); }
-    if (!wir_type_valid(ref program, program.bool_type) || program.arena.types[wir_id_index(UInt32(program.bool_type))].kind != WirTypeKind.BoolType) { wir_report(errors, "module has no canonical Bool type"); }
+    if (program.target.length() == 0) {
+        wir_report(errors, "module has no target triple");
+    }
+    if (program.pointer_bits != 32 && program.pointer_bits != 64) {
+        wir_report(errors, "module has an unsupported pointer width");
+    }
+    if (!program.data_layout.valid) {
+        wir_report(errors, "module has no data layout for its target");
+    }
+    else if (program.data_layout.pointer_bits != program.pointer_bits) {
+        wir_report(errors, "module pointer width does not match its data layout");
+    }
+    if (!wir_type_valid(ref program, program.void_type) || program.arena.types[wir_id_index(UInt32(program.void_type))].kind != WirTypeKind.VoidType) {
+        wir_report(errors, "module has no canonical Void type");
+    }
+    if (!wir_type_valid(ref program, program.bool_type) || program.arena.types[wir_id_index(UInt32(program.bool_type))].kind != WirTypeKind.BoolType) {
+        wir_report(errors, "module has no canonical Bool type");
+    }
     wir_check_types(ref program, errors);
     wir_check_sized_types(ref program, errors);
     wir_check_values(ref program, errors);
     wir_check_constants(ref program, errors);
     wir_check_symbols(ref program, errors);
-    if (verbose) { print("Verifying WIR globals and functions"); }
+    if verbose {
+        print("Verifying WIR globals and functions");
+    }
     let layouts: Vector(WirTypeLayout) = wir_type_layouts(program);
     wir_check_globals(ref program, layouts, errors);
     wir_check_functions(ref program, layouts, errors);
-    if (verbose) { print("Verifying WIR SSA scopes"); }
-    if (errors.length() == 0) { wir_check_value_scopes(ref program, errors); }
+    if verbose {
+        print("Verifying WIR SSA scopes");
+    }
+    if (errors.length() == 0) {
+        wir_check_value_scopes(ref program, errors);
+    }
     return errors;
 }

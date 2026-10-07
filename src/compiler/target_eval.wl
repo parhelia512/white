@@ -1,10 +1,11 @@
-// compiler/target_eval.wl
+// src/compiler/target_eval.wl
 import "sys"
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "target.wl"
+
 
 func target_intrinsic_symbol(ref c: Compiler, node: NodeID) -> SymbolInfo {
     if (!has_node(node)) { return SymbolInfo(); }
@@ -20,7 +21,9 @@ func target_intrinsic_symbol(ref c: Compiler, node: NodeID) -> SymbolInfo {
         let access: VarAccessNode = get_var_access_node(ref c.arena, node);
         info = find_symbol(ref c, access.name_tok.value);
     }
-    if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) { return SymbolInfo(); }
+    if (!has_symbol(info) || !info.reg.starts_with("$intrinsic.")) {
+        return SymbolInfo();
+    }
     return info;
 }
 
@@ -32,44 +35,84 @@ func target_intrinsic(ref c: Compiler, node: NodeID) -> String {
 
 func target_value(name: String) -> Int {
     if (name == "target_os") { return Int(get_target_os()); }
-    if (name == "target_arch") { return Int(get_target_arch()); }
-    if (name == "target_abi") { return Int(get_target_abi()); }
-    if (name == "target_binary_format") { return Int(get_target_binary_format()); }
-    if (name == "target_pointer_bits") { return get_target_pointer_bits(); }
+    if (name == "target_arch") {
+        return Int(get_target_arch());
+    }
+    if (name == "target_abi") {
+        return Int(get_target_abi());
+    }
+    if (name == "target_binary_format") {
+        return Int(get_target_binary_format());
+    }
+    if (name == "target_pointer_bits") {
+        return get_target_pointer_bits();
+    }
     return -1;
 }
 
 func target_member(name: String, member: String) -> Int {
     if (name == "target_os") {
-        if (member == "Windows") { return Int(sys.Os.Windows); }
-        if (member == "Linux") { return Int(sys.Os.Linux); }
+        if (member == "Windows") {
+            return Int(sys.Os.Windows);
+        }
+        if (member == "Linux") {
+            return Int(sys.Os.Linux);
+        }
         if (member == "MacOS") { return Int(sys.Os.MacOS); }
-        if (member == "Unknown") { return Int(sys.Os.Unknown); }
+        if (member == "Unknown") {
+            return Int(sys.Os.Unknown);
+        }
     } else if (name == "target_arch") {
-        if (member == "X86") { return Int(sys.Arch.X86); }
-        if (member == "X86_64") { return Int(sys.Arch.X86_64); }
+        if (member == "X86") {
+            return Int(sys.Arch.X86);
+        }
+        if (member == "X86_64") {
+            return Int(sys.Arch.X86_64);
+        }
         if (member == "Arm") { return Int(sys.Arch.Arm); }
-        if (member == "AArch64") { return Int(sys.Arch.AArch64); }
-        if (member == "Unknown") { return Int(sys.Arch.Unknown); }
+        if (member == "AArch64") {
+            return Int(sys.Arch.AArch64);
+        }
+        if (member == "Unknown") {
+            return Int(sys.Arch.Unknown);
+        }
     } else if (name == "target_abi") {
-        if (member == "Msvc") { return Int(sys.Abi.Msvc); }
-        if (member == "Gnu") { return Int(sys.Abi.Gnu); }
-        if (member == "None") { return Int(sys.Abi.None); }
+        if (member == "Msvc") {
+            return Int(sys.Abi.Msvc);
+        }
+        if (member == "Gnu") {
+            return Int(sys.Abi.Gnu);
+        }
+        if (member == "None") {
+            return Int(sys.Abi.None);
+        }
         if (member == "Unknown") { return Int(sys.Abi.Unknown); }
     } else if (name == "target_binary_format") {
-        if (member == "Coff") { return Int(sys.BinaryFormat.Coff); }
-        if (member == "Elf") { return Int(sys.BinaryFormat.Elf); }
-        if (member == "MachO") { return Int(sys.BinaryFormat.MachO); }
+        if (member == "Coff") {
+            return Int(sys.BinaryFormat.Coff);
+        }
+        if (member == "Elf") {
+            return Int(sys.BinaryFormat.Elf);
+        }
+        if (member == "MachO") {
+            return Int(sys.BinaryFormat.MachO);
+        }
         if (member == "Unknown") { return Int(sys.BinaryFormat.Unknown); }
     }
     return -1;
 }
 
 func target_enum_name(name: String) -> String {
-    if (name == "target_os") { return "Os"; }
+    if (name == "target_os") {
+        return "Os";
+    }
     if (name == "target_arch") { return "Arch"; }
-    if (name == "target_abi") { return "Abi"; }
-    if (name == "target_binary_format") { return "BinaryFormat"; }
+    if (name == "target_abi") {
+        return "Abi";
+    }
+    if (name == "target_binary_format") {
+        return "BinaryFormat";
+    }
     return "";
 }
 
@@ -141,9 +184,7 @@ func fold_target_cond(ref c: Compiler, node: NodeID) -> Int {
     return 1;
 }
 
-
 func emit_target_intrinsic(ref c: Compiler, info: SymbolInfo) -> CompileResult {
     let name: String = info.reg.slice(11, info.reg.length());
     return CompileResult(reg="" + target_value(name), type=info.type, origin_type=info.type);
 }
-

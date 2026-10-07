@@ -1,6 +1,7 @@
-// compiler/wir/reachability.wl
+// src/compiler/wir/reachability.wl
 
 import * from "model.wl"
+
 
 struct WirReachability(
     functions: Vector(Bool),
@@ -17,7 +18,9 @@ func wir_queue_function(program: WirModule, function_id: WirFuncID, ref live: Ve
 func wir_find_function(program: WirModule, name: String) -> WirFuncID {
     let i: Int = 0;
     while (i < program.arena.functions.length()) {
-        if (program.arena.functions[i].name == name) { return WirFuncID(UInt32(i + 1)); }
+        if (program.arena.functions[i].name == name) {
+            return WirFuncID(UInt32(i + 1));
+        }
         i++;
     }
     return NO_WIR_FUNC;
@@ -25,14 +28,18 @@ func wir_find_function(program: WirModule, name: String) -> WirFuncID {
 
 func wir_queue_global(program: WirModule, global_id: WirGlobalID, ref live: Vector(Bool), ref queue: Vector(WirGlobalID)) -> Void {
     let index: Int = wir_id_index(UInt32(global_id));
-    if (index < 0 || index >= program.arena.globals.length() || live[index]) { return; }
+    if (index < 0 || index >= program.arena.globals.length() || live[index]) {
+        return;
+    }
     live[index] = true;
     queue.append(global_id);
 }
 
 func wir_queue_value(program: WirModule, value_id: WirValueID, ref live: Vector(Bool), ref queue: Vector(WirValueID)) -> Void {
     let index: Int = wir_id_index(UInt32(value_id));
-    if (index < 0 || index >= program.arena.values.length() || live[index]) { return; }
+    if (index < 0 || index >= program.arena.values.length() || live[index]) {
+        return;
+    }
     live[index] = true;
     queue.append(value_id);
 }

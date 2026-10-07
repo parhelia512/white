@@ -1,10 +1,11 @@
-// compiler/constants.wl
+// src/compiler/constants.wl
 import * from "../frontend/ast.wl"
 import * from "../frontend/arena.wl"
 import * from "context.wl"
 import * from "../frontend/tokens.wl"
 import * from "../frontend/diagnostics.wl"
 import * from "lowering/numeric.wl"
+
 
 func check_layout_type(ref c: Compiler, type_id: Int, is_align: Bool, pos: Position) -> Bool {
     let property: String = "size";
@@ -26,9 +27,11 @@ func check_layout_type(ref c: Compiler, type_id: Int, is_align: Bool, pos: Posit
 }
 
 func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
-    if (!has_node(node)) { return 0L; }
+    if (!has_node(node)) {
+        return 0L;
+    }
     let base: Int = node_tag(node);
-    
+
     if (base == NODE_INT) {
         let n: IntNode = get_int_node(ref c.arena, node);
         return string_to_long(n.tok.value, n.pos);
@@ -42,7 +45,9 @@ func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
         let layout: TypeLayoutNode = get_type_layout_node(ref c.arena, node);
         let type_id: Int = resolve_type(ref c, layout.type_node);
         if (!check_layout_type(ref c, type_id, layout.is_align, layout.pos)) { return 0L; }
-        if (layout.is_align) { return Long(get_type_align_bytes(ref c, type_id)); }
+        if (layout.is_align) {
+            return Long(get_type_align_bytes(ref c, type_id));
+        }
         return Long(get_type_size_bytes(ref c, type_id));
     }
 
@@ -50,8 +55,12 @@ func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
         let u: UnaryOpNode = get_unary_node(ref c.arena, node);
         let op_str: String = u.op_tok.value;
         let val: Long = eval_const_long(ref c, u.node, pos);
-        if (op_str == "-") { return 0L - val; }
-        if (op_str == "~") { return val ^ -1L; }
+        if (op_str == "-") {
+            return 0L - val;
+        }
+        if (op_str == "~") {
+            return val ^ -1L;
+        }
         throw_type_error(pos, "Invalid unary operator for const integer.");
         return 0L;
     }
@@ -61,24 +70,40 @@ func eval_const_long(ref c: Compiler, node: NodeID, pos: Position) -> Long {
         let op_str: String = b.op_tok.value;
         let left: Long = eval_const_long(ref c, b.left, pos);
         let right: Long = eval_const_long(ref c, b.right, pos);
-        
+
         if (op_str == "+") { return left + right; }
-        if (op_str == "-") { return left - right; }
+        if (op_str == "-") {
+            return left - right;
+        }
         if (op_str == "*") { return left * right; }
-        if (op_str == "/") { 
-            if (right == 0L) { throw_zero_division_error(pos, "Compile-time division by zero."); return 0L; }
-            return left / right; 
+        if (op_str == "/") {
+            if (right == 0L) {
+                throw_zero_division_error(pos, "Compile-time division by zero.");
+                return 0L;
+            }
+            return left / right;
         }
-        if (op_str == "%") { 
-            if (right == 0L) { throw_zero_division_error(pos, "Compile-time modulo by zero."); return 0L; }
-            return left % right; 
+        if (op_str == "%") {
+            if (right == 0L) {
+                throw_zero_division_error(pos, "Compile-time modulo by zero.");
+                return 0L;
+            }
+            return left % right;
         }
-        if (op_str == "<<") { return left << right; }
-        if (op_str == ">>") { return left >> right; }
-        if (op_str == "&") { return left & right; }
+        if (op_str == "<<") {
+            return left << right;
+        }
+        if (op_str == ">>") {
+            return left >> right;
+        }
+        if (op_str == "&") {
+            return left & right;
+        }
         if (op_str == "|") { return left | right; }
-        if (op_str == "^") { return left ^ right; }
-        
+        if (op_str == "^") {
+            return left ^ right;
+        }
+
         throw_type_error(pos, "Invalid binary operator for const integer.");
         return 0L;
     }
@@ -105,7 +130,9 @@ func get_const_symbol(ref c: Compiler, node: VarAccessNode, pos: Position) -> Sy
 
 func get_const_num(ref c: Compiler, node: VarAccessNode, pos: Position) -> Float {
     let info: SymbolInfo = get_const_symbol(ref c, node, pos);
-    if (!has_symbol(info)) { return 0.0; }
+    if (!has_symbol(info)) {
+        return 0.0;
+    }
     if (!c.constant_nums.contains_key(info.reg)) {
         throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not numeric.");
         return 0.0;
@@ -125,15 +152,24 @@ func get_const_integer(ref c: Compiler, node: VarAccessNode, pos: Position) -> L
 
 func get_const_wide_integer(ref c: Compiler, node: VarAccessNode, pos: Position) -> UInt128 {
     let info: SymbolInfo = get_const_symbol(ref c, node, pos);
-    if (!has_symbol(info)) { return UInt128(0); }
-    if (c.constant_wide_integers.contains_key(info.reg)) { return c.constant_wide_integers.lookup(info.reg); }
-    if (c.constant_integers.contains_key(info.reg)) { let integer: Long = c.constant_integers.lookup(info.reg); return UInt128(integer); }
+    if (!has_symbol(info)) {
+        return UInt128(0);
+    }
+    if (c.constant_wide_integers.contains_key(info.reg)) {
+        return c.constant_wide_integers.lookup(info.reg);
+    }
+    if (c.constant_integers.contains_key(info.reg)) {
+        let integer: Long = c.constant_integers.lookup(info.reg);
+        return UInt128(integer);
+    }
     throw_type_error(pos, "Constant '" + node.name_tok.value + "' is not an integer.");
     return UInt128(0);
 }
 
 func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
-    if (!has_node(node)) { return 0.0; }
+    if (!has_node(node)) {
+        return 0.0;
+    }
     let base: Int = node_tag(node);
     if (base == NODE_FLOAT) {
         let value: FloatNode = get_float_node(ref c.arena, node);
@@ -162,7 +198,9 @@ func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
         let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         let value: Float = eval_const_float(ref c, unary.node, pos);
         if (unary.op_tok.type == TOK_PLUS) { return value; }
-        if (unary.op_tok.type == TOK_SUB) { return 0.0 - value; }
+        if (unary.op_tok.type == TOK_SUB) {
+            return 0.0 - value;
+        }
         throw_type_error(pos, "Invalid unary operator in floating-point constant expression.");
         return 0.0;
     }
@@ -172,17 +210,27 @@ func eval_const_float(ref c: Compiler, node: NodeID, pos: Position) -> Float {
         let right: Float = eval_const_float(ref c, binary.right, pos);
         let op: Int = binary.op_tok.type;
         if (op == TOK_PLUS) { return left + right; }
-        if (op == TOK_SUB) { return left - right; }
+        if (op == TOK_SUB) {
+            return left - right;
+        }
         if (op == TOK_MUL) { return left * right; }
         if (op == TOK_DIV) {
-            if (right == 0.0) { throw_zero_division_error(pos, "Compile-time division by zero."); return 0.0; }
+            if (right == 0.0) {
+                throw_zero_division_error(pos, "Compile-time division by zero.");
+                return 0.0;
+            }
             return left / right;
         }
         if (op == TOK_MOD) {
-            if (right == 0.0) { throw_zero_division_error(pos, "Compile-time modulo by zero."); return 0.0; }
+            if (right == 0.0) {
+                throw_zero_division_error(pos, "Compile-time modulo by zero.");
+                return 0.0;
+            }
             return left % right;
         }
-        if (op == TOK_POW) { return left ** right; }
+        if (op == TOK_POW) {
+            return left ** right;
+        }
         throw_type_error(pos, "Invalid binary operator in floating-point constant expression.");
         return 0.0;
     }
@@ -209,15 +257,28 @@ func llvm_float_literal(value: Float) -> String {
 func parse_const_uint128(raw: String, pos: Position) -> UInt128 {
     let end: Int = raw.length();
     if (raw.ends_with("ULL") || raw.ends_with("ull")) { end -= 3; }
-    else if (raw.ends_with("LL") || raw.ends_with("ll") || raw.ends_with("UL") || raw.ends_with("ul")) { end -= 2; }
-    else if (raw.ends_with("U") || raw.ends_with("u") || raw.ends_with("L") || raw.ends_with("l")) { end -= 1; }
+    else if (raw.ends_with("LL") || raw.ends_with("ll") || raw.ends_with("UL") || raw.ends_with("ul")) {
+        end -= 2;
+    }
+    else if (raw.ends_with("U") || raw.ends_with("u") || raw.ends_with("L") || raw.ends_with("l")) {
+        end -= 1;
+    }
 
     let base: UInt128 = UInt128(10U);
     let i: Int = 0;
     if (end >= 2 && raw[0] == '0') {
-        if (raw[1] == 'x' || raw[1] == 'X') { base = UInt128(16U); i = 2; }
-        else if (raw[1] == 'b' || raw[1] == 'B') { base = UInt128(2U); i = 2; }
-        else if (raw[1] == 'o' || raw[1] == 'O') { base = UInt128(8U); i = 2; }
+        if (raw[1] == 'x' || raw[1] == 'X') {
+            base = UInt128(16U);
+            i = 2;
+        }
+        else if (raw[1] == 'b' || raw[1] == 'B') {
+            base = UInt128(2U);
+            i = 2;
+        }
+        else if (raw[1] == 'o' || raw[1] == 'O') {
+            base = UInt128(8U);
+            i = 2;
+        }
     }
     if (i == end) {
         throw_invalid_syntax(pos, "Integer literal has no digits.");
@@ -232,7 +293,9 @@ func parse_const_uint128(raw: String, pos: Position) -> UInt128 {
             let digit: Int = -1;
             if (ch >= '0' && ch <= '9') { digit = Int(ch) - Int('0'); }
             else if (ch >= 'a' && ch <= 'f') { digit = Int(ch) - Int('a') + 10; }
-            else if (ch >= 'A' && ch <= 'F') { digit = Int(ch) - Int('A') + 10; }
+            else if (ch >= 'A' && ch <= 'F') {
+                digit = Int(ch) - Int('A') + 10;
+            }
             if (digit == -1 || UInt128(digit) >= base) {
                 throw_invalid_syntax(pos, "Invalid 128-bit integer literal.");
                 return UInt128(0);
@@ -250,7 +313,9 @@ func parse_const_uint128(raw: String, pos: Position) -> UInt128 {
 }
 
 func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: Bool) -> UInt128 {
-    if (!has_node(node)) { return UInt128(0); }
+    if (!has_node(node)) {
+        return UInt128(0);
+    }
     let base: Int = node_tag(node);
 
     if (base == NODE_INT) {
@@ -271,8 +336,12 @@ func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: 
     if (base == NODE_UNARYOP) {
         let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         let value: UInt128 = eval_const_wide(ref c, unary.node, pos, is_unsigned);
-        if (unary.op_tok.value == "-") { return UInt128(0) - value; }
-        if (unary.op_tok.value == "~") { return value ^ 340282366920938463463374607431768211455ULL; }
+        if (unary.op_tok.value == "-") {
+            return UInt128(0) - value;
+        }
+        if (unary.op_tok.value == "~") {
+            return value ^ 340282366920938463463374607431768211455ULL;
+        }
         throw_type_error(pos, "Invalid unary operator for 128-bit constant integer.");
         return UInt128(0);
     }
@@ -282,24 +351,40 @@ func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: 
         let left: UInt128 = eval_const_wide(ref c, binary.left, pos, is_unsigned);
         let right: UInt128 = eval_const_wide(ref c, binary.right, pos, is_unsigned);
 
-        if (op == "+") { return left + right; }
-        if (op == "-") { return left - right; }
-        if (op == "*") { return left * right; }
-        if (op == "<<") { return left << right; }
+        if (op == "+") {
+            return left + right;
+        }
+        if (op == "-") {
+            return left - right;
+        }
+        if (op == "*") {
+            return left * right;
+        }
+        if (op == "<<") {
+            return left << right;
+        }
         if (op == ">>") {
             if is_unsigned { return left >> right; }
             return UInt128(Int128(left) >> Int128(right));
         }
-        if (op == "&") { return left & right; }
-        if (op == "|") { return left | right; }
-        if (op == "^") { return left ^ right; }
+        if (op == "&") {
+            return left & right;
+        }
+        if (op == "|") {
+            return left | right;
+        }
+        if (op == "^") {
+            return left ^ right;
+        }
         if (op == "/" || op == "%") {
             if (right == UInt128(0)) {
                 throw_zero_division_error(pos, "Compile-time division by zero.");
                 return UInt128(0);
             }
             if is_unsigned {
-                if (op == "/") { return left / right; }
+                if (op == "/") {
+                    return left / right;
+                }
                 return left % right;
             }
 
@@ -309,7 +394,9 @@ func eval_const_wide(ref c: Compiler, node: NodeID, pos: Position, is_unsigned: 
                 throw_overflow_error(pos, "Compile-time signed division overflow.");
                 return UInt128(0);
             }
-            if (op == "/") { return UInt128(signed_left / signed_right); }
+            if (op == "/") {
+                return UInt128(signed_left / signed_right);
+            }
             return UInt128(signed_left % signed_right);
         }
 
@@ -340,7 +427,11 @@ func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
         let op_str: String = u.op_tok.value;
         if (op_str == "!") {
             let val: Int = eval_const_bool(ref c, u.node, pos);
-            if (val == 1) { return 0; } else { return 1; }
+            if (val == 1) {
+                return 0;
+            } else {
+                return 1;
+            }
         }
         throw_type_error(pos, "Invalid unary operator for const boolean.");
         return 0;
@@ -352,12 +443,20 @@ func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
         if (op_str == "&&") {
             let left: Int = eval_const_bool(ref c, b.left, pos);
             let right: Int = eval_const_bool(ref c, b.right, pos);
-            if (left == 1 && right == 1) { return 1; } else { return 0; }
+            if (left == 1 && right == 1) {
+                return 1;
+            } else {
+                return 0;
+            }
         }
         if (op_str == "||") {
             let left: Int = eval_const_bool(ref c, b.left, pos);
             let right: Int = eval_const_bool(ref c, b.right, pos);
-            if (left == 1 || right == 1) { return 1; } else { return 0; }
+            if (left == 1 || right == 1) {
+                return 1;
+            } else {
+                return 0;
+            }
         }
 
         if (op_str == "==" || op_str == "!=" || op_str == "<" || op_str == ">" || op_str == "<=" || op_str == ">=") {
@@ -367,30 +466,78 @@ func eval_const_bool(ref c: Compiler, node: NodeID, pos: Position) -> Int {
                 let use_unsigned: Bool = is_unsigned_integer(left_type) || is_unsigned_integer(right_type);
                 let left_wide: UInt128 = eval_const_wide(ref c, b.left, pos, use_unsigned);
                 let right_wide: UInt128 = eval_const_wide(ref c, b.right, pos, use_unsigned);
-                if (op_str == "==") { if (left_wide == right_wide) { return 1; } else { return 0; } }
-                if (op_str == "!=") { if (left_wide != right_wide) { return 1; } else { return 0; } }
+                if (op_str == "==") {
+                    if (left_wide == right_wide) { return 1; }
+                    return 0;
+                }
+                if (op_str == "!=") {
+                    if (left_wide != right_wide) { return 1; }
+                    return 0;
+                }
                 if use_unsigned {
-                    if (op_str == "<") { if (left_wide < right_wide) { return 1; } else { return 0; } }
-                    if (op_str == ">") { if (left_wide > right_wide) { return 1; } else { return 0; } }
-                    if (op_str == "<=") { if (left_wide <= right_wide) { return 1; } else { return 0; } }
-                    if (op_str == ">=") { if (left_wide >= right_wide) { return 1; } else { return 0; } }
+                    if (op_str == "<") {
+                        if (left_wide < right_wide) { return 1; }
+                        return 0;
+                    }
+                    if (op_str == ">") {
+                        if (left_wide > right_wide) { return 1; }
+                        return 0;
+                    }
+                    if (op_str == "<=") {
+                        if (left_wide <= right_wide) { return 1; }
+                        return 0;
+                    }
+                    if (op_str == ">=") {
+                        if (left_wide >= right_wide) { return 1; }
+                        return 0;
+                    }
                 } else {
                     let signed_left: Int128 = Int128(left_wide);
                     let signed_right: Int128 = Int128(right_wide);
-                    if (op_str == "<") { if (signed_left < signed_right) { return 1; } else { return 0; } }
-                    if (op_str == ">") { if (signed_left > signed_right) { return 1; } else { return 0; } }
-                    if (op_str == "<=") { if (signed_left <= signed_right) { return 1; } else { return 0; } }
-                    if (op_str == ">=") { if (signed_left >= signed_right) { return 1; } else { return 0; } }
+                    if (op_str == "<") {
+                        if (signed_left < signed_right) { return 1; }
+                        return 0;
+                    }
+                    if (op_str == ">") {
+                        if (signed_left > signed_right) { return 1; }
+                        return 0;
+                    }
+                    if (op_str == "<=") {
+                        if (signed_left <= signed_right) { return 1; }
+                        return 0;
+                    }
+                    if (op_str == ">=") {
+                        if (signed_left >= signed_right) { return 1; }
+                        return 0;
+                    }
                 }
             }
             let left: Long = eval_const_long(ref c, b.left, pos);
             let right: Long = eval_const_long(ref c, b.right, pos);
-            if (op_str == "==") { if (left == right) { return 1; } else { return 0; } }
-            if (op_str == "!=") { if (left != right) { return 1; } else { return 0; } }
-            if (op_str == "<") { if (left < right) { return 1; } else { return 0; } }
-            if (op_str == ">") { if (left > right) { return 1; } else { return 0; } }
-            if (op_str == "<=") { if (left <= right) { return 1; } else { return 0; } }
-            if (op_str == ">=") { if (left >= right) { return 1; } else { return 0; } }
+            if (op_str == "==") {
+                if (left == right) { return 1; }
+                return 0;
+            }
+            if (op_str == "!=") {
+                if (left != right) { return 1; }
+                return 0;
+            }
+            if (op_str == "<") {
+                if (left < right) { return 1; }
+                return 0;
+            }
+            if (op_str == ">") {
+                if (left > right) { return 1; }
+                return 0;
+            }
+            if (op_str == "<=") {
+                if (left <= right) { return 1; }
+                return 0;
+            }
+            if (op_str == ">=") {
+                if (left >= right) { return 1; }
+                return 0;
+            }
         }
 
         throw_type_error(pos, "Invalid binary operator for const boolean.");
@@ -414,7 +561,7 @@ func decimal_uint128_to_float(value: UInt128) -> Float {
 }
 
 func parse_decimal_float_literal(raw: String) -> Float {
-// keep literal parsing self-hosted; the compiler cannot assume libc is present
+// keep literal parsing self-hosted, the compiler cannot assume libc is present
     let end: Int = raw.length();
     if (raw.ends_with("f") || raw.ends_with("F")) { end -= 1; }
 
@@ -435,7 +582,7 @@ func parse_decimal_float_literal(raw: String) -> Float {
                 break;
             }
             significand = significand * UInt128(10U) + digit;
-            if (in_fraction) {
+            if in_fraction {
                 if (scale > maximum / UInt128(10U)) {
                     exact = false;
                     break;
@@ -445,7 +592,9 @@ func parse_decimal_float_literal(raw: String) -> Float {
         }
         i++;
     }
-    if (exact) { return decimal_uint128_to_float(significand) / decimal_uint128_to_float(scale); }
+    if exact {
+        return decimal_uint128_to_float(significand) / decimal_uint128_to_float(scale);
+    }
 
     let result: Float = 0.0;
     let fraction_scale: Float = 0.1;
@@ -468,4 +617,3 @@ func parse_decimal_float_literal(raw: String) -> Float {
     }
     return result;
 }
-

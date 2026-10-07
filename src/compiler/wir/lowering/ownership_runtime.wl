@@ -1,22 +1,29 @@
-// compiler/wir/lowering/ownership_runtime.wl
+// src/compiler/wir/lowering/ownership_runtime.wl
 
 import * from "../model.wl"
 import * from "../builder.wl"
 import wir_find_function from "declarations.wl"
 
+
 func wir_emit_retain_runtime(ref program: WirModule, raw_pointer: WirTypeID) -> Void {
-    if (wir_find_function(program, "__wl_retain") != NO_WIR_FUNC) { return; }
+// emit retain in WIR so LLVM and native targets share the same ARC rules
+    if (wir_find_function(program, "__wl_retain") != NO_WIR_FUNC) {
+        return;
+    }
 
     let i32_type: WirTypeID = wir_signed_int_type(ref program, 32);
     let refcount_pointer: WirTypeID = wir_pointer_type(ref program, i32_type);
+
     let function_id: WirFuncID = wir_add_function(ref program, "__wl_retain", [wir_param("object", raw_pointer)], program.void_type, false, WirLinkage.Internal, WirABI.White);
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     let object: WirValueID = function.parameters[0];
+
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let work: WirBlockID = wir_add_block(ref program, function_id, "work", []);
     let retain: WirBlockID = wir_add_block(ref program, function_id, "retain", []);
     let trap: WirBlockID = wir_add_block(ref program, function_id, "trap", []);
     let done: WirBlockID = wir_add_block(ref program, function_id, "done", []);
+
     let zero: WirValueID = wir_const_int(ref program, i32_type, UInt128(0U));
     let one: WirValueID = wir_const_int(ref program, i32_type, UInt128(1U));
     let static_refcount: WirValueID = wir_const_int(ref program, i32_type, UInt128(UInt32(4294967295U)));
@@ -38,15 +45,20 @@ func wir_emit_retain_runtime(ref program: WirModule, raw_pointer: WirTypeID) -> 
 }
 
 func wir_emit_release_runtime(ref program: WirModule, deallocator: WirFuncID, raw_pointer: WirTypeID, string_type_tag: Int) -> Void {
-    if (wir_find_function(program, "__wl_release") != NO_WIR_FUNC) { return; }
+// the last owner runs dynamic drop glue before returning the allocation to the platform
+    if (wir_find_function(program, "__wl_release") != NO_WIR_FUNC) {
+        return;
+    }
 
     let i32_type: WirTypeID = wir_signed_int_type(ref program, 32);
     let refcount_pointer: WirTypeID = wir_pointer_type(ref program, i32_type);
     let raw_pointer_pointer: WirTypeID = wir_pointer_type(ref program, raw_pointer);
     let drop_type: WirTypeID = wir_function_type(ref program, [raw_pointer], program.void_type, false, WirABI.White);
+
     let function_id: WirFuncID = wir_add_function(ref program, "__wl_release", [wir_param("object", raw_pointer)], program.void_type, false, WirLinkage.Internal, WirABI.White);
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     let object: WirValueID = function.parameters[0];
+
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
     let work: WirBlockID = wir_add_block(ref program, function_id, "work", []);
     let release: WirBlockID = wir_add_block(ref program, function_id, "release", []);
@@ -56,6 +68,7 @@ func wir_emit_release_runtime(ref program: WirModule, deallocator: WirFuncID, ra
     let destroy_dynamic: WirBlockID = wir_add_block(ref program, function_id, "destroy.dynamic", []);
     let destroy_legacy: WirBlockID = wir_add_block(ref program, function_id, "destroy.legacy", []);
     let done: WirBlockID = wir_add_block(ref program, function_id, "done", []);
+
     let zero: WirValueID = wir_const_int(ref program, i32_type, UInt128(0U));
     let one: WirValueID = wir_const_int(ref program, i32_type, UInt128(1U));
     let static_refcount: WirValueID = wir_const_int(ref program, i32_type, UInt128(UInt32(4294967295U)));
@@ -98,8 +111,13 @@ func wir_emit_release_runtime(ref program: WirModule, deallocator: WirFuncID, ra
 }
 
 func wir_emit_ownership_runtime(ref program: WirModule, deallocator: WirFuncID, string_type_tag: Int) -> Void {
-    if (!wir_module_uses_opcode(ref program, WirOpcode.Retain) && !wir_module_uses_opcode(ref program, WirOpcode.Release)) { return; }
+// do not carry ARC helpers into programs which never touch owned values
+    if (!wir_module_uses_opcode(ref program, WirOpcode.Retain) && !wir_module_uses_opcode(ref program, WirOpcode.Release)) {
+        return;
+    }
+
     let raw_pointer: WirTypeID = wir_pointer_type(ref program, program.void_type);
+
     wir_emit_retain_runtime(ref program, raw_pointer);
     wir_emit_release_runtime(ref program, deallocator, raw_pointer, string_type_tag);
 }

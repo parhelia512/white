@@ -1,7 +1,7 @@
-// compiler/backend/llvm.wl
-
+// src/compiler/backend/llvm.wl
 import "file"
 import "strings"
+
 
 func llvm_line_end(text: String, start: Int) -> Int {
     let end: Int = start;
@@ -61,7 +61,7 @@ func llvm_function_end(text: String, start: Int) -> Int {
 }
 
 func llvm_write_function(output: strings.Builder, text: String, start: Int, end: Int) -> Void? {
-    // WLC emits fixed-layout stack slots; one lexical slot must be reused by every loop iteration
+// WLC emits fixed-layout stack slots, one lexical slot must be reused by every loop iteration
     let entry_end: Int = start;
     let pos: Int = start;
     while (pos < end) {
@@ -74,21 +74,27 @@ func llvm_write_function(output: strings.Builder, text: String, start: Int, end:
     }
     if (entry_end == start) {
         output.write(text.slice(start, end))?;
+
         return;
     }
 
     output.write(text.slice(start, entry_end))?;
+
     pos = entry_end;
     while (pos < end) {
         let line_end: Int = llvm_line_end(text, pos);
-        if (llvm_line_is_alloca(text, pos, line_end)) { output.write(text.slice(pos, line_end))?; }
+        if (llvm_line_is_alloca(text, pos, line_end)) {
+            output.write(text.slice(pos, line_end))?;
+        }
         pos = line_end;
     }
 
     pos = entry_end;
     while (pos < end) {
         let line_end: Int = llvm_line_end(text, pos);
-        if (!llvm_line_is_alloca(text, pos, line_end)) { output.write(text.slice(pos, line_end))?; }
+        if (!llvm_line_is_alloca(text, pos, line_end)) {
+            output.write(text.slice(pos, line_end))?;
+        }
         pos = line_end;
     }
     return;
@@ -105,7 +111,9 @@ func hoist_llvm_allocas_text(text: String) -> String? {
             pos = function_end;
             continue;
         }
+
         output.write(text.slice(pos, line_end))?;
+
         pos = line_end;
     }
     return output.build()?;

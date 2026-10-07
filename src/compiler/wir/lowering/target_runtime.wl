@@ -1,4 +1,4 @@
-// compiler/wir/lowering/target_runtime.wl
+// src/compiler/wir/lowering/target_runtime.wl
 
 import * from "../model.wl"
 import * from "../builder.wl"
@@ -6,6 +6,7 @@ import * from "declarations.wl"
 import * from "globals.wl"
 import * from "types.wl"
 import * from "../../context.wl"
+
 
 func wir_windows_target(program: WirModule) -> Bool {
     return program.target == "i686-pc-windows-msvc" || program.target == "x86_64-pc-windows-msvc";
@@ -18,7 +19,9 @@ func wir_runtime_function(ref source: Compiler, program: WirModule, link_name: S
         return NO_WIR_FUNC;
     }
     let function_id: WirFuncID = wir_find_function(program, info.name);
-    if (function_id == NO_WIR_FUNC) { errors.append("Windows entry point cannot find WIR function '" + info.name + "'"); }
+    if (function_id == NO_WIR_FUNC) {
+        errors.append("Windows entry point cannot find WIR function '" + info.name + "'");
+    }
     return function_id;
 }
 
@@ -49,10 +52,16 @@ func wir_emit_failure_runtime(ref types: WirTypeMap, ref source: Compiler, ref p
     if (!has_func(writer_info) || !has_func(exit_info)) { return; }
 
     let writer: WirFuncID = wir_find_function(program, writer_info.name);
-    if (writer == NO_WIR_FUNC) { writer = wir_lower_function_decl(ref types, ref source, ref program, writer_info); }
+    if (writer == NO_WIR_FUNC) {
+        writer = wir_lower_function_decl(ref types, ref source, ref program, writer_info);
+    }
     let exit: WirFuncID = wir_find_function(program, exit_info.name);
-    if (exit == NO_WIR_FUNC) { exit = wir_lower_function_decl(ref types, ref source, ref program, exit_info); }
-    if (writer == NO_WIR_FUNC || exit == NO_WIR_FUNC) { return; }
+    if (exit == NO_WIR_FUNC) {
+        exit = wir_lower_function_decl(ref types, ref source, ref program, exit_info);
+    }
+    if (writer == NO_WIR_FUNC || exit == NO_WIR_FUNC) {
+        return;
+    }
 
     wir_failure_function(ref program, "__wl_fail_null", "RuntimeError: Null pointer dereference\n", writer, exit);
     wir_failure_function(ref program, "__wl_fail_bounds", "RuntimeError: Index out of bounds\n", writer, exit);
@@ -85,7 +94,9 @@ func wir_emit_windows_dll_entry(ref program: WirModule) -> Void {
 }
 
 func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, errors: Vector(String)) -> Void {
-    if (wir_find_function(program, "mainCRTStartup") != NO_WIR_FUNC) { return; }
+    if (wir_find_function(program, "mainCRTStartup") != NO_WIR_FUNC) {
+        return;
+    }
     let main_id: WirFuncID = wir_find_function(program, "main");
     if (main_id == NO_WIR_FUNC) {
         errors.append("Windows executable has no main function");
@@ -113,7 +124,9 @@ func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, e
 
     let args_id: WirFuncID = wir_runtime_function(ref source, program, "startup_args", errors);
     let free_id: WirFuncID = wir_runtime_function(ref source, program, "startup_args_free", errors);
-    if (args_id == NO_WIR_FUNC || free_id == NO_WIR_FUNC) { return; }
+    if (args_id == NO_WIR_FUNC || free_id == NO_WIR_FUNC) {
+        return;
+    }
     let int_type: WirTypeID = wir_signed_int_type(ref program, 32);
     let argc_slot: WirValueID = wir_stack_alloc(ref program, entry, int_type, "argc.addr", no_wir_location());
     wir_store(ref program, entry, wir_const_int(ref program, int_type, UInt128(0U)), argc_slot, no_wir_location());
@@ -137,10 +150,14 @@ func wir_emit_windows_main_entry(ref source: Compiler, ref program: WirModule, e
 }
 
 func wir_emit_target_runtime(ref source: Compiler, ref program: WirModule, errors: Vector(String)) -> Void {
-    if (!wir_windows_target(program)) { return; }
+    if (!wir_windows_target(program)) {
+        return;
+    }
     let has_runtime: Bool = source.is_shared || has_func(wir_compiler_link_function(ref source, "process_exit"));
     if (!has_runtime) { return; }
     wir_emit_windows_abi(ref program);
-    if (source.is_shared) { wir_emit_windows_dll_entry(ref program); }
+    if (source.is_shared) {
+        wir_emit_windows_dll_entry(ref program);
+    }
     else { wir_emit_windows_main_entry(ref source, ref program, errors); }
 }

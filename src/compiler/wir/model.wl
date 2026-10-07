@@ -1,4 +1,4 @@
-// compiler/wir/model.wl
+// src/compiler/wir/model.wl
 
 type WirTypeID = UInt32;
 type WirValueID = UInt32;

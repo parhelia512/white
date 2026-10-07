@@ -4,6 +4,7 @@
 import "internal/runtime"
 import Hash from "protocol"
 
+
 error Error {
     KeyNotFound
 }
@@ -15,7 +16,7 @@ struct Variant(
 
 @CompilerLink("dict_key_hash")
 func __key_hash(key: Variant) -> Int {
-    // the previous compiler uses this body while bootstrapping the intrinsic
+// the previous compiler uses this body while bootstrapping the intrinsic
     let text: String = key;
     let hash: Int = 5381;
     let i: Int = 0;
@@ -36,7 +37,8 @@ func __keys_equal(left: Variant, right: Variant) -> Bool {
 }
 
 class Dict {
-    let ptr keys: Variant = nullptr; 
+// dynamic dictionary, Variant keeps keys and values intentionally heterogeneous
+    let ptr keys: Variant = nullptr;
     let ptr values: Variant = nullptr;
     let ptr hashes: Int    = nullptr;
     let capacity: Int = 0;
@@ -149,6 +151,7 @@ class Dict {
     }
 
     func put(key: Variant, value: Variant) -> Void {
+    // replace an existing slot or insert with open addressing
         let hash: Int = self.__hash(key);
         let mask: Int = self.capacity - 1;
         let idx: Int = hash & mask;
@@ -182,6 +185,7 @@ class Dict {
     }
 
     func get(key: Variant) -> Variant {
+    // return null when the key is absent, use contains_key when null is a stored value
         if (self.size == 0) { return null; }
         let hash: Int = self.__hash(key);
         let mask: Int = self.capacity - 1;
@@ -196,13 +200,17 @@ class Dict {
     }
 
     func remove(key: Variant) -> Void {
-        if (self.size == 0) { return; }
+        if (self.size == 0) {
+            return;
+        }
         let hash: Int = self.__hash(key);
         let mask: Int = self.capacity - 1;
         let idx: Int = hash & mask;
         while true {
             let current: Int = self.hashes[idx];
-            if (current == 0) { return; }
+            if (current == 0) {
+                return;
+            }
             if (current == hash && __keys_equal(self.keys[idx], key)) {
                 self.hashes[idx] = 1;
                 self.keys[idx] = null;
@@ -238,6 +246,7 @@ class Dict {
     }
 
     func clear() -> Void {
+    // release every occupied slot but keep the table allocation
         self.__release_slots(self.keys, self.values, self.hashes, self.capacity);
         runtime.mem_set(self.hashes, 0, UIntSize(self.capacity) * UIntSize(4));
         self.size = 0;
@@ -245,14 +254,26 @@ class Dict {
     }
 
     deinit() {
-        if (self.keys is !nullptr && self.values is !nullptr && self.hashes is !nullptr) { self.__release_slots(self.keys, self.values, self.hashes, self.capacity); }
-        if (self.keys is !nullptr) { runtime.mem_dealloc(self.keys); self.keys = nullptr; }
-        if (self.values is !nullptr) { runtime.mem_dealloc(self.values); self.values = nullptr; }
-        if (self.hashes is !nullptr) { runtime.mem_dealloc(self.hashes); self.hashes = nullptr; }
+        if (self.keys is !nullptr && self.values is !nullptr && self.hashes is !nullptr) {
+            self.__release_slots(self.keys, self.values, self.hashes, self.capacity);
+        }
+        if (self.keys is !nullptr) {
+            runtime.mem_dealloc(self.keys);
+            self.keys = nullptr;
+        }
+        if (self.values is !nullptr) {
+            runtime.mem_dealloc(self.values);
+            self.values = nullptr;
+        }
+        if (self.hashes is !nullptr) {
+            runtime.mem_dealloc(self.hashes);
+            self.hashes = nullptr;
+        }
     }
 }
 
 class Dict<K: Hash, V> {
+// typed dictionary, keys and values stay unboxed after monomorphization
     let ptr keys: K = nullptr;
     let ptr values: V = nullptr;
     let ptr hashes: Int = nullptr;
@@ -319,7 +340,7 @@ class Dict<K: Hash, V> {
         let ptr new_keys: K = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(K));
         let ptr new_values: V = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(V));
         let ptr new_hashes: Int = runtime.mem_alloc_zeroed(UIntSize(new_cap) * size_of(Int));
-    
+
         if (new_keys is nullptr || new_values is nullptr || new_hashes is nullptr) {
             runtime.mem_dealloc(new_keys);
             runtime.mem_dealloc(new_values);
@@ -355,9 +376,7 @@ class Dict<K: Hash, V> {
     }
 
     func __prepare_insert() -> Bool {
-        if ((self.size + self.tombstones + 1) * 3 < self.capacity * 2) {
-            return false;
-        }
+        if ((self.size + self.tombstones + 1) * 3 < self.capacity * 2) { return false; }
         if ((self.size + 1) * 3 < self.capacity * 2) {
             self.__rehash(self.capacity);
             return true;
@@ -372,6 +391,7 @@ class Dict<K: Hash, V> {
     }
 
     func put(key: K, value: V) -> Void {
+    // insert or replace without changing the key's concrete type
         let hash: Int = self.__hash(key);
         if (hash < 2) {
             runtime.panic("Dict key is not hashable");
@@ -400,9 +420,7 @@ class Dict<K: Hash, V> {
                 return;
             }
             if (current == 1) {
-                if (first_tombstone == -1) {
-                    first_tombstone = idx;
-                }
+                if (first_tombstone == -1) { first_tombstone = idx; }
             }
             else if (current == hash && self.__equal(self.keys[idx], key)) {
                 self.values[idx] = value;
@@ -414,6 +432,7 @@ class Dict<K: Hash, V> {
     }
 
     func get(key: K) -> V? {
+    // return a fallible value so absence cannot be confused with a zero value
         if (self.size == 0) {
             throw Error.KeyNotFound;
         }
@@ -435,6 +454,7 @@ class Dict<K: Hash, V> {
     }
 
     func lookup(key: K) -> V {
+    // return the zero value when absent, compiler tables use this for cheap probes
         if (self.size == 0) {
             return self.__zero_value();
         }
@@ -456,18 +476,14 @@ class Dict<K: Hash, V> {
     }
 
     func remove(key: K) -> Bool {
-        if (self.size == 0) {
-            return false;
-        }
+        if (self.size == 0) { return false; }
 
         let hash: Int = self.__hash(key);
         let mask: Int = self.capacity - 1;
         let idx: Int = hash & mask;
         while true {
             let current: Int = self.hashes[idx];
-            if (current == 0) {
-                return false;
-            }
+            if (current == 0) { return false; }
 
             if (current == hash && self.__equal(self.keys[idx], key)) {
                 self.hashes[idx] = 1;
@@ -484,21 +500,15 @@ class Dict<K: Hash, V> {
     }
 
     func contains_key(key: K) -> Bool {
-        if (self.size == 0) {
-            return false;
-        }
+        if (self.size == 0) { return false; }
 
         let hash: Int = self.__hash(key);
         let mask: Int = self.capacity - 1;
         let idx: Int = hash & mask;
         while true {
             let current: Int = self.hashes[idx];
-            if (current == 0) {
-                return false;
-            }
-            if (current == hash && self.__equal(self.keys[idx], key)) {
-                return true;
-            }
+            if (current == 0) { return false; }
+            if (current == hash && self.__equal(self.keys[idx], key)) { return true; }
             idx = (idx + 1) & mask;
         }
         return false;
@@ -521,8 +531,8 @@ class Dict<K: Hash, V> {
     }
 
     deinit() {
-        if (self.keys is !nullptr && 
-            self.values is !nullptr && 
+        if (self.keys is !nullptr &&
+            self.values is !nullptr &&
             self.hashes is !nullptr) {
             self.__clear_slots(self.keys, self.values, self.hashes, self.capacity);
         }

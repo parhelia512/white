@@ -4,10 +4,13 @@
 import "internal/io" as standard_io
 import "internal/runtime/string" as runtime_string
 
+
 func write(value: String) -> Int? {
 // write once and return the number of bytes accepted by the operating system
     if (value is null) { value = "null"; }
+
     let count: Int = standard_io.write(
+
         standard_io.STDERR,
         runtime_string.data(value),
         value.length()

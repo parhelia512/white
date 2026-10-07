@@ -4,6 +4,7 @@
 import * from "../../sys/target.wl"
 import "internal/runtime/string" as runtime_string
 
+
 func startup_info_size() -> Int {
     return Int(size_of(AnyPtr) * UIntSize(9) + UIntSize(32));
 }
@@ -19,11 +20,30 @@ extern "system" {
     func HeapFree(hHeap: AnyPtr, dwFlags: Int, lpMem: AnyPtr) -> Int;
     func GetLastError() -> Int;
     func GetEnvironmentVariableW(lpName: AnyPtr, lpBuffer: AnyPtr, nSize: Int) -> Int;
-    func CreateProcessW(lpApplicationName: AnyPtr, lpCommandLine: AnyPtr, lpProcessAttributes: AnyPtr, lpThreadAttributes: AnyPtr, bInheritHandles: Int, dwCreationFlags: Int, lpEnvironment: AnyPtr, lpCurrentDirectory: AnyPtr, lpStartupInfo: AnyPtr, lpProcessInformation: AnyPtr) -> Int;
+    func CreateProcessW(
+        lpApplicationName: AnyPtr,
+        lpCommandLine: AnyPtr,
+        lpProcessAttributes: AnyPtr,
+        lpThreadAttributes: AnyPtr,
+        bInheritHandles: Int,
+        dwCreationFlags: Int,
+        lpEnvironment: AnyPtr,
+        lpCurrentDirectory: AnyPtr,
+        lpStartupInfo: AnyPtr,
+        lpProcessInformation: AnyPtr
+    ) -> Int;
     func WaitForSingleObject(hHandle: AnyPtr, dwMilliseconds: Int) -> Int;
     func GetExitCodeProcess(hProcess: AnyPtr, lpExitCode: AnyPtr) -> Int;
     func CloseHandle(hObject: AnyPtr) -> Int;
-    func CreateFileW(lpFileName: AnyPtr, dwDesiredAccess: Int, dwShareMode: Int, lpSecurityAttributes: AnyPtr, dwCreationDisposition: Int, dwFlagsAndAttributes: Int, hTemplateFile: AnyPtr) -> AnyPtr;
+    func CreateFileW(
+        lpFileName: AnyPtr,
+        dwDesiredAccess: Int,
+        dwShareMode: Int,
+        lpSecurityAttributes: AnyPtr,
+        dwCreationDisposition: Int,
+        dwFlagsAndAttributes: Int,
+        hTemplateFile: AnyPtr
+    ) -> AnyPtr;
     func GetFileAttributesW(lpFileName: AnyPtr) -> Int;
     func GetFileSizeEx(hFile: AnyPtr, lpFileSize: AnyPtr) -> Int;
     func ReadFile(hFile: AnyPtr, lpBuffer: AnyPtr, nNumberOfBytesToRead: Int, lpNumberOfBytesRead: AnyPtr, lpOverlapped: AnyPtr) -> Int;
@@ -37,7 +57,16 @@ extern "system" {
     func GetConsoleMode(hConsoleHandle: AnyPtr, lpMode: AnyPtr) -> Int;
     func WriteConsoleW(hConsoleOutput: AnyPtr, lpBuffer: AnyPtr, nNumberOfCharsToWrite: Int, lpNumberOfCharsWritten: AnyPtr, lpReserved: AnyPtr) -> Int;
     func MultiByteToWideChar(CodePage: Int, dwFlags: Int, lpMultiByteStr: AnyPtr, cbMultiByte: Int, lpWideCharStr: AnyPtr, cchWideChar: Int) -> Int;
-    func WideCharToMultiByte(CodePage: Int, dwFlags: Int, lpWideCharStr: AnyPtr, cchWideChar: Int, lpMultiByteStr: AnyPtr, cbMultiByte: Int, lpDefaultChar: AnyPtr, lpUsedDefaultChar: AnyPtr) -> Int;
+    func WideCharToMultiByte(
+        CodePage: Int,
+        dwFlags: Int,
+        lpWideCharStr: AnyPtr,
+        cchWideChar: Int,
+        lpMultiByteStr: AnyPtr,
+        cbMultiByte: Int,
+        lpDefaultChar: AnyPtr,
+        lpUsedDefaultChar: AnyPtr
+    ) -> Int;
 }
 
 const STD_INPUT_HANDLE: Int = -10;
@@ -110,5 +139,7 @@ func utf16_to_utf8(value: AnyPtr, length: Int) -> String {
 
 func free_utf16(value: AnyPtr) -> Void {
     if (OS != Os.Windows) { return; }
-    if (value is !nullptr) { HeapFree(GetProcessHeap(), 0, value); }
+    if (value is !nullptr) {
+        HeapFree(GetProcessHeap(), 0, value);
+    }
 }
