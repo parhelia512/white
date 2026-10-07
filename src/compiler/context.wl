@@ -100,6 +100,7 @@ struct SymbolInfo(
     is_const: Bool, // const
     is_const_access: Bool,
     is_ref_param: Bool,
+    is_reference: Bool,
     func_arg_types: Vector(Struct),
     arg_names: Vector(String),
     variadic_param: Int

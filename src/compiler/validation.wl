@@ -70,6 +70,35 @@ func reject_const_write(ref c: Compiler, node: NodeID, pos: Position) -> Bool {
     return true;
 }
 
+func is_reference_binding_initializer(ref c: Compiler, node: NodeID) -> Bool {
+    if (!has_node(node) || node_tag(node) != NODE_REF) { return false; }
+    let reference: RefNode = get_ref_node(ref c.arena, node);
+    return has_node(reference.node) && node_tag(reference.node) != NODE_SLICE_ACCESS;
+}
+
+func stable_reference_binding_target(ref c: Compiler, node: NodeID) -> Bool {
+    if (!has_node(node)) { return false; }
+    let kind: Int = node_tag(node);
+    if (kind == NODE_VAR_ACCESS) {
+        let access: VarAccessNode = get_var_access_node(ref c.arena, node);
+        return has_symbol(find_symbol(ref c, access.name_tok.value));
+    }
+    if (kind == NODE_FIELD_ACCESS) {
+        let access: FieldAccessNode = get_field_access_node(ref c.arena, node);
+        let owner_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.obj));
+        if (is_pointer_type(ref c, owner_type)) { return false; }
+        let owner: StructInfo = c.struct_id_map.lookup("" + owner_type);
+        return has_struct(owner) && !owner.is_class && stable_reference_binding_target(ref c, access.obj);
+    }
+    if (kind == NODE_INDEX_ACCESS) {
+        let access: IndexAccessNode = get_index_access_node(ref c.arena, node);
+        let target_type: Int = get_repr_type(ref c, get_expr_type(ref c, access.target));
+        let array: ArrayInfo = c.array_info_map.lookup("" + target_type);
+        return has_array_info(array) && array.size >= 0 && stable_reference_binding_target(ref c, access.target);
+    }
+    return false;
+}
+
 func method_mutates_self(ref c: Compiler, node: NodeID) -> Bool {
     if (!has_node(node)) { return false; }
     let base: Int = node_tag(node);

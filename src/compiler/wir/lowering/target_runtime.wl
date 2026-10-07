@@ -57,6 +57,7 @@ func wir_emit_failure_runtime(ref types: WirTypeMap, ref source: Compiler, ref p
     wir_failure_function(ref program, "__wl_fail_null", "RuntimeError: Null pointer dereference\n", writer, exit);
     wir_failure_function(ref program, "__wl_fail_bounds", "RuntimeError: Index out of bounds\n", writer, exit);
     wir_failure_function(ref program, "__wl_fail_division", "RuntimeError: Division by zero\n", writer, exit);
+    wir_failure_function(ref program, "__wl_fail_overflow", "RuntimeError: Signed division overflow\n", writer, exit);
     wir_failure_function(ref program, "__wl_fail_erased_type", "RuntimeError: Erased value has the wrong concrete type\n", writer, exit);
 }
 

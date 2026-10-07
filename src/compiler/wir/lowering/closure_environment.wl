@@ -11,9 +11,10 @@ import * from "declarations.wl"
 import * from "../../context.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+import throw_type_error from "../../../frontend/diagnostics.wl"
 
 func wir_reference_parameter(program: WirModule, binding: WirBinding) -> Bool {
-    if (binding.address == NO_WIR_VALUE) { return false; }
+    if (!binding.is_reference || binding.address == NO_WIR_VALUE) { return false; }
     return program.arena.values[wir_id_index(UInt32(binding.address))].kind == WirValueKind.FunctionParameter;
 }
 
@@ -50,8 +51,12 @@ func wir_closure_captures(ref state: WirFunctionLowering, ref source: Compiler, 
             i++;
             continue;
         }
-        if (wir_reference_parameter(program, binding)) {
-            state.errors.append("Local function '" + node.name_tok.value + "' cannot capture reference parameter '" + name + "'");
+        if (binding.is_reference) {
+            if (wir_reference_parameter(program, binding)) {
+                throw_type_error(node.pos, "Cannot capture reference parameter '" + name + "'.");
+            } else {
+                throw_type_error(node.pos, "Cannot capture reference binding '" + name + "'.");
+            }
             return null;
         }
         captures.append(binding);

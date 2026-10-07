@@ -9,7 +9,8 @@ struct WirBinding(
     address: WirValueID,
     is_const: Bool,
     owns_value: Bool,
-    pending_init: Bool
+    pending_init: Bool,
+    is_reference: Bool
 )
 
 struct WirExpr(

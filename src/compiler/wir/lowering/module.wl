@@ -54,6 +54,15 @@ func wir_extern_info(ref source: Compiler, node: ExternFuncNode) -> FuncInfo {
 
 func wir_declare_extern(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: ExternFuncNode) -> Void {
     register_extern_library(ref source, node.link_name, node.pos);
+    let parameter_index: Int = 0;
+    while (node.params is !null && parameter_index < node.params.length()) {
+        let parameter: ParamNode = node.params[parameter_index];
+        if (parameter.pass_mode == PARAM_REF) {
+            throw_extern_error(parameter.pos, "Extern functions cannot use reference parameters; declare a pointer parameter instead.");
+            return;
+        }
+        parameter_index++;
+    }
     let info: FuncInfo = wir_extern_info(ref source, node);
     if (!has_func(info)) {
         types.errors.append("Extern function '" + node.name_tok.value + "' was not registered before WIR lowering");

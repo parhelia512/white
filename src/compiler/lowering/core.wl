@@ -148,9 +148,17 @@ func compile_block(ref c: Compiler, node: BlockNode) -> CompileResult {
 func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     let target_type_id: Int = resolve_type(ref c, node.type_node);
     let const_access: Bool = node.is_const;
+    let reference_binding: Bool = is_reference_binding_initializer(ref c, node.value) &&
+                                  (target_type_id == TYPE_AUTO ||
+                                   (!is_pointer_type(ref c, target_type_id) && target_type_id != TYPE_ANYPTR));
 
     if (target_type_id == TYPE_AUTO) {
-        target_type_id = get_expr_type(ref c, node.value);
+        if (reference_binding) {
+            let reference: RefNode = get_ref_node(ref c.arena, node.value);
+            target_type_id = get_expr_type(ref c, reference.node);
+        } else {
+            target_type_id = get_expr_type(ref c, node.value);
+        }
         if (target_type_id == TYPE_POISON) {
             let curr_scope: Scope = c.symbol_table;
             curr_scope.table.put(node.name_tok.value, SymbolInfo(reg="poison", type=TYPE_POISON, origin_type=TYPE_POISON, is_const=false));
@@ -187,6 +195,10 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     let var_name: String = node.name_tok.value;
 
     if (c.scope_depth == 0) {
+        if (reference_binding) {
+            throw_type_error(node.pos, "Reference bindings are only allowed for local variables.");
+            return void_result();
+        }
         let sys_anns: SystemAnnResult = consume_annotations(ref c, node.annotations, var_name);
 
         let full_var_name: String = var_name;
@@ -390,6 +402,29 @@ func compile_var_decl(ref c: Compiler, node: VarDeclareNode) -> CompileResult {
     }
     let ptr_reg: String = c.alloc_regs[node.alloc_id];
     let origin_id: Int = target_type_id;
+
+    if (reference_binding) {
+        let reference: RefNode = get_ref_node(ref c.arena, node.value);
+        if (!stable_reference_binding_target(ref c, reference.node)) {
+            throw_type_error(node.pos, "Cannot bind a reference to storage that may move or be released.");
+            return void_result();
+        }
+        if (!node.is_const && const_access_root(ref c, reference.node).length() != 0) {
+            throw_type_error(node.pos, "Cannot bind a mutable reference to constant storage.");
+            return void_result();
+        }
+        let target: CompileResult = compile_lvalue_ptr(ref c, reference.node, reference.pos);
+        if (!has_result(target) || target.type == TYPE_POISON) {
+            return CompileResult(reg="poison", type=TYPE_POISON);
+        }
+        if (target.type != target_type_id) {
+            throw_type_error(node.pos, "Type mismatch. Expected " + get_type_name(ref c, target_type_id) + ", got " + get_type_name(ref c, target.type) + ".");
+            return void_result();
+        }
+        let scope: Scope = c.symbol_table;
+        scope.table.put(var_name, SymbolInfo(reg=target.reg, type=target_type_id, origin_type=target.origin_type, is_const=node.is_const, is_const_access=node.is_const, is_reference=true));
+        return void_result();
+    }
 
     if (!has_node(node.value)) {
         let s_info: StructInfo = c.struct_id_map.lookup("" + target_type_id);
@@ -1145,7 +1180,7 @@ func compile_func_def(ref c: Compiler, node: FunctionDefNode) -> CompileResult {
         let llvm_ty: String = get_llvm_type_str(ref c, target_type_id);
         if (p.pass_mode == PARAM_REF) {
             let curr_scope: Scope = c.symbol_table;
-            curr_scope.table.put(p_name, SymbolInfo(reg="%arg" + arg_idx, type=target_type_id, origin_type=target_type_id, is_ref_param=true));
+            curr_scope.table.put(p_name, SymbolInfo(reg="%arg" + arg_idx, type=target_type_id, origin_type=target_type_id, is_ref_param=true, is_reference=true));
             arg_idx += 1;
             continue;
         }
@@ -1262,7 +1297,7 @@ func compile_method_def(ref c: Compiler, class_name: String, node: MethodDefNode
         let llvm_ty: String = get_llvm_type_str(ref c, target_type_id);
         let arg_num: Int = arg_idx + 1;
         if (p.pass_mode == PARAM_REF) {
-            curr_scope.table.put(p_name, SymbolInfo(reg="%arg" + arg_num, type=target_type_id, origin_type=target_type_id, is_const=false, is_ref_param=true));
+            curr_scope.table.put(p_name, SymbolInfo(reg="%arg" + arg_num, type=target_type_id, origin_type=target_type_id, is_const=false, is_ref_param=true, is_reference=true));
             arg_idx += 1;
             continue;
         }
@@ -1747,6 +1782,10 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
                 throw_type_error(func_def.pos, "Cannot capture reference parameter '" + v_name + "'.");
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
+            if (info.is_reference) {
+                throw_type_error(func_def.pos, "Cannot capture reference binding '" + v_name + "'.");
+                return CompileResult(reg="poison", type=TYPE_POISON);
+            }
             captures.append(v_name); 
             capture_types.append(TypeListNode(type=info.type));
         }
@@ -1904,7 +1943,7 @@ func compile_local_closure(ref c: Compiler, func_def: FunctionDefNode) -> Compil
         let p_ty: String = get_llvm_type_str(ref c, p_ty_id);
 
         if (p_node.pass_mode == PARAM_REF) {
-            c.symbol_table.table.put(p_node.name_tok.value, SymbolInfo(reg="%arg" + p_i, type=p_ty_id, origin_type=p_ty_id, is_const=false, is_ref_param=true));
+            c.symbol_table.table.put(p_node.name_tok.value, SymbolInfo(reg="%arg" + p_i, type=p_ty_id, origin_type=p_ty_id, is_const=false, is_ref_param=true, is_reference=true));
             p_i += 1;
             continue;
         }
