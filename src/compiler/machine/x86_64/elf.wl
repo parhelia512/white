@@ -76,16 +76,20 @@ func elf_add_string(ref table: Vector(Byte), name: String, ref offsets: Dict(Str
     return offset;
 }
 
-func elf_reloc_type(kind: X86RelocationKind) -> UInt32 {
+func elf_reloc_type(kind: X86RelocationKind, external_call: Bool) -> UInt32 {
     if (kind == X86RelocationKind.Abs64) { return 1U; }
-    if (kind == X86RelocationKind.Rel32) { return 2U; }
+    if (kind == X86RelocationKind.Rel32) {
+        if (external_call) { return 4U; }
+        return 2U;
+    }
     return 0U;
 }
 
 func elf_reloc_data(
     relocations: Vector(X86Relocation),
     section: String,
-    symbols: Dict(String, Int)
+    symbols: Dict(String, Int),
+    all_symbols: Vector(X86Symbol)
 ) -> Vector(Byte)? {
     let out: Vector(Byte) = [];
     let i: Int = 0;
@@ -93,7 +97,16 @@ func elf_reloc_data(
         let relocation: X86Relocation = relocations[i];
         if (relocation.section == section) {
             let symbol: Int = symbols.lookup(relocation.symbol);
-            let kind: UInt32 = elf_reloc_type(relocation.kind);
+            let external_call: Bool = false;
+            let symbol_index: Int = 0;
+            while (symbol_index < all_symbols.length()) {
+                if (all_symbols[symbol_index].name == relocation.symbol) {
+                    external_call = relocation.kind == X86RelocationKind.Rel32 && all_symbols[symbol_index].section.length() == 0;
+                    break;
+                }
+                symbol_index += 1;
+            }
+            let kind: UInt32 = elf_reloc_type(relocation.kind, external_call);
             if (symbol == 0 || kind == 0) { throw Error.InvalidArgument; }
             elf_u64(ref out, UInt64(relocation.offset));
             elf_u64(ref out, (UInt64(symbol) << 32UL) | UInt64(kind));
@@ -193,7 +206,7 @@ func elf_object(input: X86Object) -> Vector(Byte)? {
     i = 0;
     while (i < reloc_names.length()) {
         let target: String = reloc_names[i].slice(5, reloc_names[i].length());
-        let reloc: Vector(Byte) = elf_reloc_data(input.relocations, target, sym_indices)?;
+        let reloc: Vector(Byte) = elf_reloc_data(input.relocations, target, sym_indices, input.symbols)?;
         let section_index: Int = input.sections.length() + i;
         sections[section_index].data = reloc;
         sections[section_index].link = UInt32(symtab_index + 1);
