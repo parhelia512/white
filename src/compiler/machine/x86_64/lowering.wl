@@ -3913,7 +3913,10 @@ func x86_lower_function_with_layouts(
         x86_frame_enter(ref output, frame_size);
     }
     if indirect_return {
-        x86_store_scalar(ref output, X86Register.RCX, X86Register.RBP, return_pointer, 8);
+        // The hidden destination follows the normal integer argument bank,
+        // RCX on Win64 and RDI on SysV, before user parameters are assigned.
+        let return_register: X86Register = x86_argument_register(0, false);
+        x86_store_scalar(ref output, return_register, X86Register.RBP, return_pointer, 8);
     }
     if (home_parameters && !x86_home_parameters(ref program, function, stack, layouts, ref output)) {
         return x86_lowering_error("the x86_64 lowering could not save function parameters");
