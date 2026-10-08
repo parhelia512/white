@@ -126,6 +126,22 @@ func x86_parameter_index(ref function: WirFunction, value_id: WirValueID) -> Int
     return -1;
 }
 
+func x86_sysv_call_locations(ref program: WirModule, signature: WirType, layouts: Vector(WirTypeLayout), hidden: Bool) -> Vector(X86ArgLocation) {
+    let locations: Vector(X86ArgLocation) = [];
+    let cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
+    if hidden {
+        locations.append(x86_sysv_arg(ref cursor, false));
+    }
+    let i: Int = 0;
+    while (i < signature.parameters.length()) {
+        let floating: Bool = x86_scalar_float(ref program, signature.parameters[i]) &&
+            !x86_indirect_argument(ref program, signature.parameters[i], layouts);
+        locations.append(x86_sysv_arg(ref cursor, floating));
+        i += 1;
+    }
+    return locations;
+}
+
 func x86_find_function(ref program: WirModule, name: String) -> WirFuncID {
     let i: Int = 0;
     while (i < program.arena.functions.length()) {
@@ -1022,6 +1038,10 @@ func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
     let shift = 0;
     if (x86_indirect_aggregate(ref program, signature.result, layouts)) { shift = 1; }
+    let sysv_cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
+    if (x86_is_sysv_abi() && shift != 0) {
+        x86_sysv_arg(ref sysv_cursor, false);
+    }
     let parameter_index: Int = 0;
     while (parameter_index < function.parameters.length()) {
         let parameter: WirValue = program.arena.values[wir_id_index(UInt32(function.parameters[parameter_index]))];
@@ -1031,11 +1051,23 @@ func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X
         if (offset == 0 || size == 0) { return false; }
 
         let position: Int = parameter_index + shift;
-        let incoming: X86Register = x86_argument_register(position, x86_scalar_float(ref program, parameter.type_id));
+        let incoming: X86Register = X86Register.None;
+        let stack_input: Int = -1;
+        if (x86_is_sysv_abi()) {
+            let floating: Bool = x86_scalar_float(ref program, parameter.type_id) &&
+                !x86_indirect_argument(ref program, parameter.type_id, layouts);
+            let location: X86ArgLocation = x86_sysv_arg(ref sysv_cursor, floating);
+            incoming = location.register;
+            stack_input = location.stack_offset;
+        } else {
+            incoming = x86_argument_register(position, x86_scalar_float(ref program, parameter.type_id));
+        }
         if (incoming != X86Register.None) {
             if (!x86_store_scalar(ref output, incoming, X86Register.RBP, offset, size)) { return false; }
         } else {
-            let incoming_offset: Int = x86_stack_param_offset(position);
+            let incoming_offset: Int = stack_input;
+            if (!x86_is_sysv_abi()) { incoming_offset = x86_stack_param_offset(position); }
+            else { incoming_offset += 16; }
             if (incoming_offset < 0) { return false; }
             if (!x86_load_scalar(ref output, X86Register.RAX, X86Register.RBP, incoming_offset, size, x86_scalar_signed(ref program, parameter.type_id))) {
                 return false;
@@ -1225,11 +1257,18 @@ func x86_choose_result_register_avoiding(ref program: WirModule, ref state: X86B
 
 func x86_bind_entry_parameters(ref program: WirModule, ref function: WirFunction, ref plan: X86RegisterPlan) -> Void {
     let i: Int = 0;
+    let sysv_cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
     while (i < function.parameters.length()) {
         let value_id: WirValueID = function.parameters[i];
         let value: WirValue = program.arena.values[wir_id_index(UInt32(value_id))];
         if (x86_scalar_size(ref program, value.type_id) != 0) {
-            let incoming: X86Register = x86_argument_register(i, x86_scalar_float(ref program, value.type_id));
+            let incoming: X86Register = X86Register.None;
+            if (x86_is_sysv_abi()) {
+                let location: X86ArgLocation = x86_sysv_arg(ref sysv_cursor, x86_scalar_float(ref program, value.type_id));
+                incoming = location.register;
+            } else {
+                incoming = x86_argument_register(i, x86_scalar_float(ref program, value.type_id));
+            }
             if (incoming != X86Register.None) {
                 x86_bind_register(ref plan, incoming, value_id);
             }
@@ -1333,12 +1372,35 @@ func x86_materialize_register_except(
             return X86RegisterResult(register=choice.register, message="");
         }
         let index: Int = x86_parameter_index(ref function, value_id);
-        let incoming: X86Register = x86_argument_register(index, floating);
+        let incoming: X86Register = X86Register.None;
+        let incoming_offset: Int = -1;
+        if (x86_is_sysv_abi()) {
+            let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
+            let cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
+            if (x86_indirect_aggregate(ref program, signature.result, state.layouts)) {
+                x86_sysv_arg(ref cursor, false);
+            }
+            let parameter_index: Int = 0;
+            while (parameter_index <= index && parameter_index < signature.parameters.length()) {
+                let parameter_type: WirTypeID = signature.parameters[parameter_index];
+                let parameter_float: Bool = x86_scalar_float(ref program, parameter_type) &&
+                    !x86_indirect_argument(ref program, parameter_type, state.layouts);
+                let location: X86ArgLocation = x86_sysv_arg(ref cursor, parameter_float);
+                if (parameter_index == index) {
+                    incoming = location.register;
+                    incoming_offset = location.stack_offset;
+                }
+                parameter_index += 1;
+            }
+        } else {
+            incoming = x86_argument_register(index, floating);
+        }
         if (incoming != X86Register.None) {
             x86_move_scalar(ref output, choice.register, incoming, size);
             x86_normalize_scalar(ref output, choice.register, size, signed);
         } else {
-            let incoming_offset: Int = x86_stack_param_offset(index);
+            if (!x86_is_sysv_abi()) { incoming_offset = x86_stack_param_offset(index); }
+            else { incoming_offset += 16; }
             if (incoming_offset < 0) {
                 return X86RegisterResult(register=X86Register.None, message="the x86_64 ABI has no stack location for this function parameter");
             }
@@ -3409,6 +3471,10 @@ func x86_lower_instruction(ref program: WirModule,
             return "call storage exceeds the addressable stack frame";
         }
         let hidden: Bool = storage.result >= 0;
+        let locations: Vector(X86ArgLocation) = [];
+        if (x86_is_sysv_abi()) {
+            locations = x86_sysv_call_locations(ref program, signature, state.layouts, hidden);
+        }
         if (instruction.result != NO_WIR_VALUE && !hidden && x86_abi_size(ref program, instruction.type_id, state.layouts) == 0) {
             return "call result requires an unsupported machine ABI representation";
         }
@@ -3493,6 +3559,7 @@ func x86_lower_instruction(ref program: WirModule,
                 position,
                 storage.arguments[argument_index] < 0 && x86_scalar_float(ref program, signature.parameters[argument_index])
             );
+            if (x86_is_sysv_abi()) { destination = locations[position].register; }
             if (destination != X86Register.None) {
                 let size: Int = x86_abi_size(ref program, signature.parameters[argument_index], state.layouts);
                 if (storage.arguments[argument_index] >= 0) { size = 8; }
@@ -3508,10 +3575,10 @@ func x86_lower_instruction(ref program: WirModule,
             while (argument_index < signature.parameters.length()) {
                 let position: Int = argument_index;
                 if (hidden) { position++; }
-                let floating: Bool = x86_scalar_float(ref program, signature.parameters[argument_index]);
-                if (x86_argument_register(position, floating) == X86Register.None) {
+                let location: X86ArgLocation = locations[position];
+                if (location.stack_offset >= 0) {
                     let source_offset: Int = position * 8;
-                    let target_offset: Int = x86_stack_arg_offset(position);
+                    let target_offset: Int = location.stack_offset;
                     if (!x86_load_scalar(ref output, X86Register.RAX, X86Register.RSP, source_offset, 8, false) ||
                         !x86_store_scalar(ref output, X86Register.RAX, X86Register.RSP, target_offset, 8)) {
                         return "the x86_64 ABI could not stage a stack argument";
@@ -3522,6 +3589,7 @@ func x86_lower_instruction(ref program: WirModule,
         }
         if hidden {
             let hidden_register: X86Register = x86_argument_register(0, false);
+            if (x86_is_sysv_abi()) { hidden_register = locations[0].register; }
             if (hidden_register == X86Register.None) {
                 return "the x86_64 ABI has no hidden return register";
             }

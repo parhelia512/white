@@ -34,6 +34,34 @@ struct X86Win64ABI(
     callee_saved: Vector(X86Register)
 )
 
+struct X86SysVArgCursor(
+    integer_index: Int,
+    float_index: Int,
+    stack_index: Int
+)
+
+struct X86ArgLocation(
+    register: X86Register,
+    stack_offset: Int
+)
+
+func x86_sysv_arg(ref cursor: X86SysVArgCursor, floating: Bool) -> X86ArgLocation {
+    let index: Int = cursor.integer_index;
+    if floating {
+        index = cursor.float_index;
+        cursor.float_index += 1;
+    } else {
+        cursor.integer_index += 1;
+    }
+    let register: X86Register = x86_argument_register(index, floating);
+    if (register != X86Register.None) {
+        return X86ArgLocation(register=register, stack_offset=-1);
+    }
+    let offset: Int = cursor.stack_index * 8;
+    cursor.stack_index += 1;
+    return X86ArgLocation(register=X86Register.None, stack_offset=offset);
+}
+
 func x86_win64_abi() -> X86Win64ABI {
 // Win64 has four argument positions, not four integer plus four float args.
     // Keep both lists together, callers and callees must count positions the same way.
@@ -145,9 +173,8 @@ func x86_stack_param_offset(index: Int) -> Int {
 
 func x86_call_frame(argument_count: Int) -> Int {
     if (!__x86_sysv_abi) { return x86_win64_call_frame(argument_count); }
-    let staged: Int = 48;
-    if (argument_count < 6) { staged = argument_count * 8; }
+    let staged: Int = 64;
+    if (argument_count > 8) { staged += (argument_count - 8) * 8; }
     let size: Int = staged;
-    if (argument_count > 6) { size += (argument_count - 6) * 8; }
     return (size + 15) & -16;
 }
