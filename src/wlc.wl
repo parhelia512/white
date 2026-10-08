@@ -710,6 +710,13 @@ func main(argc: Int, ptr argv: String) -> Int {
     else if (cfg.backend == "machine" || cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) {
         clang_args.append("--target=" + WhitelangTarget.get_target_triple());
     }
+    // The Windows portable clang bundle normally discovers MinGW ld.exe.
+    // That linker cannot consume an ELF target, so make the cross-link choice
+    // explicit when a Windows host is producing a Linux executable.
+    if (sys.OS == sys.Os.Windows &&
+        WhitelangTarget.get_target_os() == sys.Os.Linux) {
+        clang_args.append("-fuse-ld=lld");
+    }
     if (cfg.sysroot.length() > 0) {
         clang_args.append("--sysroot=" + cfg.sysroot);
     }
