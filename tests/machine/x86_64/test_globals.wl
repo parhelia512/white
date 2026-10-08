@@ -99,6 +99,54 @@ func main() -> Int {
         print("FAIL: external global fixture COFF output");
         return 1;
     }
+
+    let linux: WirModule = new_wir_module("x86_64-unknown-linux-gnu", 64);
+    let linux_u8: WirTypeID = wir_unsigned_int_type(ref linux, 8);
+    let linux_i32: WirTypeID = wir_signed_int_type(ref linux, 32);
+    let linux_ptr: WirTypeID = wir_pointer_type(ref linux, linux_u8);
+    let linux_bytes_type: WirTypeID = wir_array_type(ref linux, linux_u8, UIntSize(4));
+    let linux_bytes: WirGlobalID = wir_add_global(
+        ref linux,
+        "linux_const_bytes",
+        linux_bytes_type,
+        wir_const_bytes(ref linux, linux_bytes_type, "elf" + String('\0')),
+        WirLinkage.Exported,
+        true
+    );
+    let linux_record_type: WirTypeID = wir_struct_type(ref linux, [linux_ptr, linux_i32]);
+    let linux_record: WirValueID = wir_const_aggregate(
+        ref linux,
+        linux_record_type,
+        [wir_const_address(ref linux, linux_ptr, wir_global_value(ref linux, linux_bytes), 0L), wir_const_int(ref linux, linux_i32, UInt128(3U))]
+    );
+    wir_add_global(ref linux, "linux_const_record", linux_record_type, linux_record, WirLinkage.Exported, true);
+
+    let linux_lowered: X86ModuleResult = x86_lower_module(ref linux);
+    if (linux_lowered.errors.length() != 0) {
+        print("FAIL: Linux global lowering: ", linux_lowered.errors[0]);
+        return 1;
+    }
+    let found_relro: Bool = false;
+    let linux_index: Int = 0;
+    while (linux_index < linux_lowered.sections.length()) {
+        if (linux_lowered.sections[linux_index].name == ".data.rel.ro" && linux_lowered.sections[linux_index].writable) {
+            found_relro = true;
+        }
+        linux_index++;
+    }
+    let found_relro_relocation: Bool = false;
+    linux_index = 0;
+    while (linux_index < linux_lowered.relocations.length()) {
+        if (linux_lowered.relocations[linux_index].section == ".data.rel.ro") {
+            found_relro_relocation = true;
+        }
+        linux_index++;
+    }
+    if (!found_relro || !found_relro_relocation) {
+        print("FAIL: Linux relocatable constants were not placed in .data.rel.ro");
+        return 1;
+    }
+
     print("PASS: x86_64 globals");
     print("OBJECT-BEGIN");
     let i: Int = 0;

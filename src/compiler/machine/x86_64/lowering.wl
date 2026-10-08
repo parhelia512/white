@@ -2169,8 +2169,9 @@ func x86_lower_instruction(ref program: WirModule,
         if (save_error.length() != 0) { return save_error; }
         let object: X86RegisterResult = x86_materialize_register(ref program, ref function, instruction.operands[0], slots, ref state, ref output);
         if (object.message.length() != 0) { return object.message; }
-        if (object.register != X86Register.RCX) {
-            x86_mov_register64(ref output, X86Register.RCX, object.register);
+        let object_arg: X86Register = x86_argument_register(0, false);
+        if (object.register != object_arg) {
+            x86_mov_register64(ref output, object_arg, object.register);
         }
         calls.append(X86CallFixup(offset=x86_call_rel32(ref output), target=target));
         x86_reset_registers(ref state.registers);

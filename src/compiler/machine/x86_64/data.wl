@@ -1,5 +1,6 @@
 // src/compiler/machine/x86_64/data.wl
 import * from "model.wl"
+import * from "abi.wl"
 import * from "../../wir/model.wl"
 
 
@@ -169,7 +170,19 @@ func x86_write_initializer(
 }
 
 func x86_emit_globals(ref program: WirModule, layouts: Vector(WirTypeLayout), reachable: Vector(Bool), ref object: X86Object) -> String {
-    let readonly_data: X86CodeSection = X86CodeSection(name=".rdata", bytes=[], alignment=1, executable=false, writable=false);
+    let readonly_name: String = ".rdata";
+    let readonly_writable: Bool = false;
+
+    // ELF string records contain pointers to their byte arrays. The dynamic
+    // linker has to write those addresses before the page becomes read-only,
+    // which is exactly what .data.rel.ro is for. Keeping them in .rdata makes
+    // a PIE carry DT_TEXTREL and some loaders reject that outright.
+    if (x86_is_sysv_abi()) {
+        readonly_name = ".data.rel.ro";
+        readonly_writable = true;
+    }
+
+    let readonly_data: X86CodeSection = X86CodeSection(name=readonly_name, bytes=[], alignment=1, executable=false, writable=readonly_writable);
     let writable_data: X86CodeSection = X86CodeSection(name=".data", bytes=[], alignment=1, executable=false, writable=true);
     let has_readonly: Bool = false;
     let has_writable: Bool = false;
