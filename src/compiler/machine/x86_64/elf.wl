@@ -218,7 +218,8 @@ func elf_object(input: X86Object) -> Vector(Byte)? {
     while (i < reloc_names.length()) {
         let target: String = reloc_names[i].slice(5, reloc_names[i].length());
         let reloc: Vector(Byte) = elf_reloc_data(input.relocations, target, sym_indices, input.symbols)?;
-        let section_index: Int = input.sections.length() + i;
+        let section_index: Int = elf_section_index(sections, reloc_names[i]);
+        if (section_index < 0) { throw Error.InvalidArgument; }
         sections[section_index].data = reloc;
         sections[section_index].link = UInt32(symtab_index + 1);
         sections[section_index].info = UInt32(elf_section_index(sections, target) + 1);

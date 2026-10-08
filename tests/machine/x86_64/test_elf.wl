@@ -44,6 +44,18 @@ func main() -> Int {
         print("FAIL: ELF section table is incomplete");
         return 1;
     }
+    let section_table: Int = Int(read_u64(object, 40));
+    let stack_header: Int = section_table + 2 * 64;
+    let relocation_header: Int = section_table + 3 * 64;
+    if (read_u32(object, stack_header + 4) != 1U || read_u64(object, stack_header + 32) != 0UL) {
+        print("FAIL: ELF GNU stack marker contains section data");
+        return 1;
+    }
+    if (read_u32(object, relocation_header + 4) != 4U || read_u64(object, relocation_header + 32) != 24UL ||
+        read_u32(object, relocation_header + 40) != 4U || read_u32(object, relocation_header + 44) != 1U) {
+        print("FAIL: ELF relocation section header is invalid");
+        return 1;
+    }
     let relocation_symbols: Dict(String, Int) = Dict();
     relocation_symbols.put("write", 2);
     let relocation_data: Vector(Byte) = elf_reloc_data(
