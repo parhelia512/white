@@ -108,9 +108,15 @@ func elf_reloc_data(
             }
             let kind: UInt32 = elf_reloc_type(relocation.kind, external_call);
             if (symbol == 0 || kind == 0) { throw Error.InvalidArgument; }
+            // x86 keeps the immediate as the value written into the instruction.
+            // ELF's PC-relative relocation starts at that four-byte field, while
+            // the instruction itself resumes after it, so the ELF addend needs
+            // the usual -4 adjustment.
+            let addend: Long = relocation.addend;
+            if (relocation.kind == X86RelocationKind.Rel32) { addend -= 4L; }
             elf_u64(ref out, UInt64(relocation.offset));
             elf_u64(ref out, (UInt64(symbol) << 32UL) | UInt64(kind));
-            elf_i64(ref out, relocation.addend);
+            elf_i64(ref out, addend);
         }
         i += 1;
     }

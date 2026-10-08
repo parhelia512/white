@@ -4088,7 +4088,7 @@ func x86_lower_module(ref program: WirModule, verbose: Bool = false) -> X86Modul
                 if (x86_is_memop(function.name)) {
                     let offset: Int = output.bytes.length();
                     if (!x86_emit_memop(ref output, function.name)) {
-                        return x86_module_error("cannot emit Windows memory support");
+                        return x86_module_error("cannot emit machine memory support");
                     }
                     symbols.append(X86Symbol(name=function.name, section=".text", offset=UInt32(offset), external=true));
                 } else {

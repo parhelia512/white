@@ -3,7 +3,7 @@
 // Focus: Encode Linux x86-64 sections, symbols, and RELA relocations.
 
 import * from "../../../src/compiler/machine/x86_64/model.wl"
-import elf_object from "../../../src/compiler/machine/x86_64/elf.wl"
+import elf_object, elf_reloc_data from "../../../src/compiler/machine/x86_64/elf.wl"
 
 func read_u16(bytes: Vector(Byte), offset: Int) -> UInt32 {
     return UInt32(bytes[offset]) | (UInt32(bytes[offset + 1]) << 8U);
@@ -12,6 +12,10 @@ func read_u16(bytes: Vector(Byte), offset: Int) -> UInt32 {
 func read_u32(bytes: Vector(Byte), offset: Int) -> UInt32 {
     return UInt32(bytes[offset]) | (UInt32(bytes[offset + 1]) << 8U) |
         (UInt32(bytes[offset + 2]) << 16U) | (UInt32(bytes[offset + 3]) << 24U);
+}
+
+func read_u64(bytes: Vector(Byte), offset: Int) -> UInt64 {
+    return UInt64(read_u32(bytes, offset)) | (UInt64(read_u32(bytes, offset + 4)) << 32UL);
 }
 
 func main() -> Int {
@@ -38,6 +42,22 @@ func main() -> Int {
     }
     if (read_u32(object, 20) != 1U || read_u16(object, 58) != 64U || read_u16(object, 60) != 6U) {
         print("FAIL: ELF section table is incomplete");
+        return 1;
+    }
+    let relocation_symbols: Dict(String, Int) = Dict();
+    relocation_symbols.put("write", 2);
+    let relocation_data: Vector(Byte) = elf_reloc_data(
+        [X86Relocation(section=".text", offset=1U, kind=X86RelocationKind.Rel32, symbol="write", addend=0L)],
+        ".text",
+        relocation_symbols,
+        symbols
+    )?;
+    catch(err) {
+        print("FAIL: ELF relocation data could not be encoded");
+        return 1;
+    }
+    if (relocation_data.length() != 24 || read_u64(relocation_data, 16) != UInt64(18446744073709551612UL)) {
+        print("FAIL: ELF PC-relative relocation did not apply the -4 addend");
         return 1;
     }
     print("PASS: x86_64 ELF object and relocation encoding");
