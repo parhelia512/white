@@ -170,6 +170,11 @@ func elf_object(input: X86Object) -> Vector(Byte)? {
         if (found) { reloc_names.append(".rela" + input.sections[i].name); }
         i += 1;
     }
+    // Mark the object as not requiring an executable process stack. Without
+    // this empty note GNU ld warns and may carry an executable-stack flag.
+    if (elf_section_index(sections, ".note.GNU-stack") < 0) {
+        sections.append(ElfSection(name=".note.GNU-stack", kind=1U, flags=0UL, align=1UL, data=[], link=0U, info=0U, entsize=0UL));
+    }
     i = 0;
     while (i < reloc_names.length()) {
         sections.append(ElfSection(name=reloc_names[i], kind=4U, flags=0UL, align=8UL, data=[], link=0U, info=0U, entsize=24UL));

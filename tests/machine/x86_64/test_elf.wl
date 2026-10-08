@@ -40,7 +40,7 @@ func main() -> Int {
         print("FAIL: ELF header does not describe an x86-64 relocatable object");
         return 1;
     }
-    if (read_u32(object, 20) != 1U || read_u16(object, 58) != 64U || read_u16(object, 60) != 6U) {
+    if (read_u32(object, 20) != 1U || read_u16(object, 58) != 64U || read_u16(object, 60) != 7U) {
         print("FAIL: ELF section table is incomplete");
         return 1;
     }
