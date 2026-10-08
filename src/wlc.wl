@@ -426,7 +426,9 @@ func main(argc: Int, ptr argv: String) -> Int {
 
             if (!temp_dir.ends_with("\\") && !temp_dir.ends_with("/")) { temp_dir += "\\"; }
         } else {
-            temp_dir = "/tmp/";
+            temp_dir = sys.env.get_env("TMPDIR");
+            if (temp_dir is null || temp_dir.length() == 0) { temp_dir = "/tmp"; }
+            if (!temp_dir.ends_with("/")) { temp_dir += "/"; }
         }
 
         let file_only: String = base_name;
