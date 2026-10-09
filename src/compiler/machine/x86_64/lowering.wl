@@ -135,7 +135,7 @@ func x86_sysv_call_locations(ref program: WirModule, signature: WirType, layouts
     let i: Int = 0;
     while (i < signature.parameters.length()) {
         let floating: Bool = x86_scalar_float(ref program, signature.parameters[i]) &&
-            !x86_indirect_argument(ref program, signature.parameters[i], layouts);
+            !x86_indirect_argument(ref program, signature.parameters[i], layouts, signature.abi);
         locations.append(x86_sysv_arg(ref cursor, floating));
         i += 1;
     }
@@ -550,6 +550,19 @@ func x86_abi_size(ref program: WirModule, type_id: WirTypeID, layouts: Vector(Wi
     return x86_scalar_size(ref program, type_id);
 }
 
+func x86_native_sysv_abi(abi: WirABI) -> Bool {
+    return x86_is_sysv_abi() && abi != WirABI.White;
+}
+
+func x86_native_abi_size(ref program: WirModule, type_id: WirTypeID, layouts: Vector(WirTypeLayout), abi: WirABI) -> Int {
+    if (x86_native_sysv_abi(abi)) {
+        let classification: X86SysVTypeClass = x86_sysv_classify(ref program, type_id, layouts);
+        if (!classification.memory) { return classification.size; }
+        return 0;
+    }
+    return x86_abi_size(ref program, type_id, layouts);
+}
+
 func x86_type_layouts(ref program: WirModule) -> Vector(WirTypeLayout) {
     return wir_type_layouts(program);
 }
@@ -584,7 +597,16 @@ func x86_stack_slots_with_uses(
             let size: Int = x86_abi_size(ref program, parameter.type_id, layouts);
             let alignment = size;
 
-            if (x86_indirect_argument(ref program, parameter.type_id, layouts)) {
+            if (x86_native_sysv_abi(function.abi) && x86_memory_value(ref program, parameter.type_id)) {
+                let layout: WirTypeLayout = layouts[wir_id_index(UInt32(parameter.type_id))];
+                if (!layout.valid || layout.size > 2147483632UL) {
+                    return [];
+                }
+
+                size = Int(layout.size);
+                if (size == 0) { size = 1; }
+                alignment = layout.alignment;
+            } else if (x86_indirect_argument(ref program, parameter.type_id, layouts, function.abi)) {
                 let layout: WirTypeLayout = layouts[wir_id_index(UInt32(parameter.type_id))];
                 if (!layout.valid || layout.size > 2147483632UL) {
                     return [];
@@ -863,12 +885,55 @@ func x86_indirect_aggregate(ref program: WirModule, type_id: WirTypeID, layouts:
     return x86_aggregate_type(ref program, type_id) && x86_abi_size(ref program, type_id, layouts) == 0;
 }
 
-func x86_indirect_argument(ref program: WirModule, type_id: WirTypeID, layouts: Vector(WirTypeLayout)) -> Bool {
+func x86_indirect_return(ref program: WirModule, type_id: WirTypeID, layouts: Vector(WirTypeLayout), abi: WirABI) -> Bool {
+    if (x86_native_sysv_abi(abi)) {
+        if (!x86_memory_value(ref program, type_id)) {
+            return false;
+        }
+        return x86_sysv_classify(ref program, type_id, layouts).memory;
+    }
+    return x86_indirect_aggregate(ref program, type_id, layouts);
+}
+
+func x86_indirect_argument(ref program: WirModule, type_id: WirTypeID, layouts: Vector(WirTypeLayout), abi: WirABI) -> Bool {
+    if (x86_native_sysv_abi(abi)) { return false; }
     return x86_indirect_aggregate(ref program, type_id, layouts) || x86_wide_integer(ref program, type_id);
 }
 
 func x86_call_storage(ref program: WirModule, signature: WirType, layouts: Vector(WirTypeLayout)) -> X86CallStorage {
-    let hidden: Bool = x86_indirect_aggregate(ref program, signature.result, layouts);
+    let hidden: Bool = x86_indirect_return(ref program, signature.result, layouts, signature.abi);
+    if (x86_native_sysv_abi(signature.abi)) {
+        let call_layout: X86SysVCallLayout = X86SysVCallLayout(hidden=X86Register.None, arguments=[], stack_size=0);
+        x86_plan_sysv_call(ref program, signature, layouts, hidden, ref call_layout);
+        let size: Int = x86_align_frame_offset(call_layout.stack_size, 16);
+        let arguments: Vector(Int) = [];
+        let i: Int = 0;
+        while (i < signature.parameters.length()) {
+            let layout: WirTypeLayout = layouts[wir_id_index(UInt32(signature.parameters[i]))];
+            if (!layout.valid || layout.size > 2147483632UL || Int(layout.size) > 2147483632 - size) {
+                return X86CallStorage(arguments=[], result=-1, size=-1);
+            }
+            arguments.append(size);
+            let extent: Int = Int(layout.size);
+            if (extent == 0) { extent = 1; }
+            size = x86_align_frame_offset(size + extent, 8);
+            i++;
+        }
+
+        let result: Int = -1;
+        if hidden {
+            let layout: WirTypeLayout = layouts[wir_id_index(UInt32(signature.result))];
+            if (!layout.valid || layout.size > 2147483632UL || Int(layout.size) > 2147483632 - size) {
+                return X86CallStorage(arguments=[], result=-1, size=-1);
+            }
+            result = size;
+            let extent: Int = Int(layout.size);
+            if (extent == 0) { extent = 1; }
+            size = x86_align_frame_offset(size + extent, 16);
+        }
+        return X86CallStorage(arguments=arguments, result=result, size=size);
+    }
+
     let count: Int = signature.parameters.length();
     if hidden { count++; }
     let size: Int = x86_call_frame(count);
@@ -880,7 +945,7 @@ func x86_call_storage(ref program: WirModule, signature: WirType, layouts: Vecto
         let indirect: Bool = hidden;
         if (i < signature.parameters.length()) {
             type_id = signature.parameters[i];
-            indirect = x86_indirect_argument(ref program, type_id, layouts);
+            indirect = x86_indirect_argument(ref program, type_id, layouts, signature.abi);
         }
         let offset = -1;
         if indirect {
@@ -1015,6 +1080,14 @@ func x86_analyze_function(ref program: WirModule, function_id: WirFuncID, functi
                 if (call_signature.kind == WirTypeKind.Function) {
                     required = x86_call_storage(ref program, call_signature, layouts).size;
                     if (required < 0) {
+                        let callee_name: String = "indirect call";
+                        if (instruction.operands.length() != 0) {
+                            let callee: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+                            if (callee.kind == WirValueKind.Function) {
+                                callee_name = program.arena.functions[wir_id_index(callee.owner)].name;
+                            }
+                        }
+                        result.message = "cannot plan outgoing storage for '" + callee_name + "'";
                         result.call_frame = -1;
                         return result;
                     }
@@ -1037,7 +1110,43 @@ func x86_analyze_function(ref program: WirModule, function_id: WirFuncID, functi
 func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X86StackIndex, layouts: Vector(WirTypeLayout), ref output: X86CodeBuffer) -> Bool {
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
     let shift = 0;
-    if (x86_indirect_aggregate(ref program, signature.result, layouts)) { shift = 1; }
+    if (x86_indirect_return(ref program, signature.result, layouts, signature.abi)) { shift = 1; }
+
+    if (x86_native_sysv_abi(signature.abi)) {
+        let native_layout: X86SysVCallLayout = X86SysVCallLayout(hidden=X86Register.None, arguments=[], stack_size=0);
+        x86_plan_sysv_call(ref program, signature, layouts, shift != 0, ref native_layout);
+        let parameter_index: Int = 0;
+        while (parameter_index < function.parameters.length()) {
+            let parameter: WirValue = program.arena.values[wir_id_index(UInt32(function.parameters[parameter_index]))];
+            let value_layout: WirTypeLayout = layouts[wir_id_index(UInt32(parameter.type_id))];
+            let location: X86SysVValueLocation = native_layout.arguments[parameter_index];
+            let offset: Int = x86_stack_offset(ref stack, function.parameters[parameter_index]);
+            if (offset == 0 || !value_layout.valid) { return false; }
+
+            if (location.stack_offset >= 0) {
+                if (!x86_copy_memory(ref output, X86Register.RBP, offset, X86Register.RBP, 16 + location.stack_offset, Int(value_layout.size), X86Register.RAX)) {
+                    return false;
+                }
+            } else {
+                let first_size: Int = location.size;
+                if (first_size > 8) { first_size = 8; }
+                if (location.count > 0 && (location.first == X86Register.None ||
+                    !x86_store_scalar(ref output, location.first, X86Register.RBP, offset, first_size))) {
+                    return false;
+                }
+                if (location.count > 1) {
+                    let second_size: Int = location.size - 8;
+                    if (location.second == X86Register.None || second_size <= 0 ||
+                        !x86_store_scalar(ref output, location.second, X86Register.RBP, offset + 8, second_size)) {
+                        return false;
+                    }
+                }
+            }
+            parameter_index++;
+        }
+        return true;
+    }
+
     let sysv_cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
     if (x86_is_sysv_abi() && shift != 0) {
         x86_sysv_arg(ref sysv_cursor, false);
@@ -1046,7 +1155,7 @@ func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X
     while (parameter_index < function.parameters.length()) {
         let parameter: WirValue = program.arena.values[wir_id_index(UInt32(function.parameters[parameter_index]))];
         let size: Int = x86_abi_size(ref program, parameter.type_id, layouts);
-        if (x86_indirect_argument(ref program, parameter.type_id, layouts)) { size = 8; }
+        if (x86_indirect_argument(ref program, parameter.type_id, layouts, signature.abi)) { size = 8; }
         let offset: Int = x86_stack_offset(ref stack, function.parameters[parameter_index]);
         if (offset == 0 || size == 0) { return false; }
 
@@ -1055,7 +1164,7 @@ func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X
         let stack_input: Int = -1;
         if (x86_is_sysv_abi()) {
             let floating: Bool = x86_scalar_float(ref program, parameter.type_id) &&
-                !x86_indirect_argument(ref program, parameter.type_id, layouts);
+                !x86_indirect_argument(ref program, parameter.type_id, layouts, signature.abi);
             let location: X86ArgLocation = x86_sysv_arg(ref sysv_cursor, floating);
             incoming = location.register;
             stack_input = location.stack_offset;
@@ -1082,7 +1191,7 @@ func x86_home_parameters(ref program: WirModule, function: WirFunction, stack: X
     parameter_index = 0;
     while (parameter_index < function.parameters.length()) {
         let parameter: WirValue = program.arena.values[wir_id_index(UInt32(function.parameters[parameter_index]))];
-        if (x86_indirect_argument(ref program, parameter.type_id, layouts)) {
+        if (x86_indirect_argument(ref program, parameter.type_id, layouts, signature.abi)) {
             let offset = x86_stack_offset(ref stack, function.parameters[parameter_index]);
             let layout: WirTypeLayout = layouts[wir_id_index(UInt32(parameter.type_id))];
             x86_load_scalar(ref output, X86Register.R10, X86Register.RBP, offset, 8, false);
@@ -1377,14 +1486,14 @@ func x86_materialize_register_except(
         if (x86_is_sysv_abi()) {
             let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
             let cursor: X86SysVArgCursor = X86SysVArgCursor(integer_index=0, float_index=0, stack_index=0);
-            if (x86_indirect_aggregate(ref program, signature.result, state.layouts)) {
+            if (x86_indirect_return(ref program, signature.result, state.layouts, signature.abi)) {
                 x86_sysv_arg(ref cursor, false);
             }
             let parameter_index: Int = 0;
             while (parameter_index <= index && parameter_index < signature.parameters.length()) {
                 let parameter_type: WirTypeID = signature.parameters[parameter_index];
                 let parameter_float: Bool = x86_scalar_float(ref program, parameter_type) &&
-                    !x86_indirect_argument(ref program, parameter_type, state.layouts);
+                    !x86_indirect_argument(ref program, parameter_type, state.layouts, signature.abi);
                 let location: X86ArgLocation = x86_sysv_arg(ref cursor, parameter_float);
                 if (parameter_index == index) {
                     incoming = location.register;
@@ -3472,11 +3581,17 @@ func x86_lower_instruction(ref program: WirModule,
             return "call storage exceeds the addressable stack frame";
         }
         let hidden: Bool = storage.result >= 0;
+        let native_sysv: Bool = x86_native_sysv_abi(signature.abi);
+        let native_layout: X86SysVCallLayout = X86SysVCallLayout(hidden=X86Register.None, arguments=[], stack_size=0);
+        if native_sysv {
+            x86_plan_sysv_call(ref program, signature, state.layouts, hidden, ref native_layout);
+        }
         let locations: Vector(X86ArgLocation) = [];
-        if (x86_is_sysv_abi()) {
+        if (x86_is_sysv_abi() && !native_sysv) {
             locations = x86_sysv_call_locations(ref program, signature, state.layouts, hidden);
         }
-        if (instruction.result != NO_WIR_VALUE && !hidden && x86_abi_size(ref program, instruction.type_id, state.layouts) == 0) {
+        if (instruction.result != NO_WIR_VALUE && !hidden &&
+            x86_native_abi_size(ref program, instruction.type_id, state.layouts, signature.abi) == 0) {
             return "call result requires an unsupported machine ABI representation";
         }
         let save_error: String = x86_save_live_registers(ref program, slots, instruction.operands, ref state, ref output);
@@ -3502,41 +3617,43 @@ func x86_lower_instruction(ref program: WirModule,
         // first place the register arguments in Win64's shadow space. Loading
         // the ABI registers only after every source has been read avoids a
         // parallel-copy problem and leaves the allocator free to use R8/R9.
-        argument_index = 0;
-        while (argument_index < signature.parameters.length()) {
-            let size: Int = x86_abi_size(ref program, signature.parameters[argument_index], state.layouts);
-            let position: Int = argument_index;
-            if hidden { position++; }
-            let offset: Int = position * 8;
-            if (!x86_is_sysv_abi() && position >= 4) { offset = x86_stack_arg_offset(position); }
-            if (offset < 0) {
-                return "the x86_64 ABI has no stack location for this argument";
-            }
-
-            if (storage.arguments[argument_index] >= 0) {
-                size = 8;
-                let choice: X86RegisterChoice = x86_choose_register(ref program, ref state.registers, state.position);
-                let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
-                if (prepare_error.length() != 0) { return prepare_error; }
-                x86_lea(ref output, choice.register, X86Register.RSP, X86Register.None, 1, storage.arguments[argument_index]);
-                x86_store_scalar(ref output, choice.register, X86Register.RSP, offset, size);
-            } else {
-                if (size == 0) {
-                    return "call argument requires an unsupported machine ABI representation";
+        if (!native_sysv) {
+            argument_index = 0;
+            while (argument_index < signature.parameters.length()) {
+                let size: Int = x86_abi_size(ref program, signature.parameters[argument_index], state.layouts);
+                let position: Int = argument_index;
+                if hidden { position++; }
+                let offset: Int = position * 8;
+                if (!x86_is_sysv_abi() && position >= 4) { offset = x86_stack_arg_offset(position); }
+                if (offset < 0) {
+                    return "the x86_64 ABI has no stack location for this argument";
                 }
-                let store_error: String = x86_store_value(
-                    ref program,
-                    ref function,
-                    instruction.operands[argument_index + 1],
-                    X86Register.RSP,
-                    offset,
-                    slots,
-                    ref state,
-                    ref output
-                );
-                if (store_error.length() != 0) { return store_error; }
+
+                if (storage.arguments[argument_index] >= 0) {
+                    size = 8;
+                    let choice: X86RegisterChoice = x86_choose_register(ref program, ref state.registers, state.position);
+                    let prepare_error: String = x86_prepare_register(ref program, ref state, choice, ref output);
+                    if (prepare_error.length() != 0) { return prepare_error; }
+                    x86_lea(ref output, choice.register, X86Register.RSP, X86Register.None, 1, storage.arguments[argument_index]);
+                    x86_store_scalar(ref output, choice.register, X86Register.RSP, offset, size);
+                } else {
+                    if (size == 0) {
+                        return "call argument requires an unsupported machine ABI representation";
+                    }
+                    let store_error: String = x86_store_value(
+                        ref program,
+                        ref function,
+                        instruction.operands[argument_index + 1],
+                        X86Register.RSP,
+                        offset,
+                        slots,
+                        ref state,
+                        ref output
+                    );
+                    if (store_error.length() != 0) { return store_error; }
+                }
+                argument_index++;
             }
-            argument_index++;
         }
 
         let indirect_target: X86Register = X86Register.None;
@@ -3552,45 +3669,77 @@ func x86_lower_instruction(ref program: WirModule,
         }
 
         x86_reset_registers(ref state.registers);
-        argument_index = 0;
-        while (argument_index < signature.parameters.length()) {
-            let position: Int = argument_index;
-            if hidden { position++; }
-            let destination: X86Register = x86_argument_register(
-                position,
-                storage.arguments[argument_index] < 0 && x86_scalar_float(ref program, signature.parameters[argument_index])
-            );
-            if (x86_is_sysv_abi()) { destination = locations[position].register; }
-            if (destination != X86Register.None) {
-                let size: Int = x86_abi_size(ref program, signature.parameters[argument_index], state.layouts);
-                if (storage.arguments[argument_index] >= 0) { size = 8; }
-                if (destination == X86Register.None || size == 0 ||
-                    !x86_load_scalar(ref output, destination, X86Register.RSP, position * 8, size, false)) {
-                    return "the x86_64 ABI cannot load a staged call argument";
-                }
-            }
-            argument_index++;
-        }
-        if (x86_is_sysv_abi()) {
+        if native_sysv {
             argument_index = 0;
             while (argument_index < signature.parameters.length()) {
-                let position: Int = argument_index;
-                if (hidden) { position++; }
-                let location: X86ArgLocation = locations[position];
+                let location: X86SysVValueLocation = native_layout.arguments[argument_index];
+                let source: Int = storage.arguments[argument_index];
                 if (location.stack_offset >= 0) {
-                    let source_offset: Int = position * 8;
-                    let target_offset: Int = location.stack_offset;
-                    if (!x86_load_scalar(ref output, X86Register.RAX, X86Register.RSP, source_offset, 8, false) ||
-                        !x86_store_scalar(ref output, X86Register.RAX, X86Register.RSP, target_offset, 8)) {
-                        return "the x86_64 ABI could not stage a stack argument";
+                    if (!x86_copy_memory(ref output, X86Register.RSP, location.stack_offset, X86Register.RSP, source,
+                        location.size, X86Register.RAX)) {
+                        return "the SysV ABI could not copy a stack argument";
+                    }
+                } else {
+                    let first_size: Int = location.size;
+                    if (first_size > 8) { first_size = 8; }
+                    if (location.count > 0 && (location.first == X86Register.None ||
+                        !x86_load_scalar(ref output, location.first, X86Register.RSP, source, first_size, false))) {
+                        return "the SysV ABI could not load the first argument eightbyte";
+                    }
+                    if (location.count > 1) {
+                        let second_size: Int = location.size - 8;
+                        if (location.second == X86Register.None || second_size <= 0 ||
+                            !x86_load_scalar(ref output, location.second, X86Register.RSP, source + 8, second_size, false)) {
+                            return "the SysV ABI could not load the second argument eightbyte";
+                        }
                     }
                 }
                 argument_index++;
             }
+        } else {
+            argument_index = 0;
+            while (argument_index < signature.parameters.length()) {
+                let position: Int = argument_index;
+                if (hidden) { position++; }
+                let destination: X86Register = x86_argument_register(
+                    position,
+                    storage.arguments[argument_index] < 0 && x86_scalar_float(ref program, signature.parameters[argument_index])
+                );
+                if (x86_is_sysv_abi()) { destination = locations[position].register; }
+                if (destination != X86Register.None) {
+                    let size: Int = x86_abi_size(ref program, signature.parameters[argument_index], state.layouts);
+                    if (storage.arguments[argument_index] >= 0) { size = 8; }
+                    if (size == 0 || !x86_load_scalar(ref output, destination, X86Register.RSP, position * 8, size, false)) {
+                        return "the x86_64 ABI cannot load a staged call argument";
+                    }
+                }
+                argument_index++;
+            }
+            if (x86_is_sysv_abi()) {
+                argument_index = 0;
+                while (argument_index < signature.parameters.length()) {
+                    let position: Int = argument_index;
+                    if hidden { position++; }
+                    let location: X86ArgLocation = locations[position];
+                    if (location.stack_offset >= 0) {
+                        let source_offset: Int = position * 8;
+                        let target_offset: Int = location.stack_offset;
+                        if (!x86_load_scalar(ref output, X86Register.RAX, X86Register.RSP, source_offset, 8, false) ||
+                            !x86_store_scalar(ref output, X86Register.RAX, X86Register.RSP, target_offset, 8)) {
+                            return "the x86_64 ABI could not stage a stack argument";
+                        }
+                    }
+                    argument_index++;
+                }
+            }
         }
         if hidden {
             let hidden_register: X86Register = x86_argument_register(0, false);
-            if (x86_is_sysv_abi()) { hidden_register = locations[0].register; }
+            if native_sysv {
+                hidden_register = native_layout.hidden;
+            } else if (x86_is_sysv_abi()) {
+                hidden_register = locations[0].register;
+            }
             if (hidden_register == X86Register.None) {
                 return "the x86_64 ABI has no hidden return register";
             }
@@ -3609,7 +3758,43 @@ func x86_lower_instruction(ref program: WirModule,
         // all allocator registers are caller-saved, including reloaded arguments
         x86_reset_registers(ref state.registers);
         if (instruction.result != NO_WIR_VALUE) {
-            if (x86_wide_integer(ref program, instruction.type_id)) {
+            if (native_sysv && x86_memory_value(ref program, instruction.type_id)) {
+                let home: Int = x86_stack_offset(ref state.stack, instruction.result);
+                if (home == 0) {
+                    return "native aggregate call result has no storage";
+                }
+                if hidden {
+                    let layout: WirTypeLayout = state.layouts[wir_id_index(UInt32(instruction.type_id))];
+                    if (!x86_copy_memory(ref output, X86Register.RBP, home, X86Register.RSP, storage.result,
+                        Int(layout.size), X86Register.RAX)) {
+                        return "cannot copy indirect native call result";
+                    }
+                } else {
+                    let classification: X86SysVTypeClass = x86_sysv_classify(ref program, instruction.type_id, state.layouts);
+                    let integer_index: Int = 0;
+                    let float_index: Int = 0;
+                    let part: Int = 0;
+                    while (part < classification.count) {
+                        let abi_class: X86SysVClass = classification.first;
+                        if (part == 1) { abi_class = classification.second; }
+                        let class_index: Int = integer_index;
+                        if (abi_class == X86SysVClass.SSE) {
+                            class_index = float_index;
+                            float_index++;
+                        } else {
+                            integer_index++;
+                        }
+                        let returned: X86Register = x86_sysv_return_register(class_index, abi_class);
+                        let part_size: Int = classification.size - part * 8;
+                        if (part_size > 8) { part_size = 8; }
+                        if (returned == X86Register.None || part_size <= 0 ||
+                            !x86_store_scalar(ref output, returned, X86Register.RBP, home + part * 8, part_size)) {
+                            return "cannot save a native aggregate call result";
+                        }
+                        part++;
+                    }
+                }
+            } else if (x86_wide_integer(ref program, instruction.type_id)) {
                 let home = x86_stack_offset(ref state.stack, instruction.result);
                 if (home == 0 || !x86_sse_vector_memory(ref output, X86Register.XMM0, X86Register.RBP, home, false)) {
                     return "cannot save a 128-bit integer call result";
@@ -3723,6 +3908,66 @@ func x86_lower_instruction(ref program: WirModule,
     if (instruction.opcode == WirOpcode.Return) {
         if (instruction.operands.length() == 1) {
             let value: WirValue = program.arena.values[wir_id_index(UInt32(instruction.operands[0]))];
+            let return_signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
+            let native_sysv: Bool = x86_native_sysv_abi(return_signature.abi);
+            if (native_sysv && x86_memory_value(ref program, value.type_id)) {
+                if (x86_indirect_return(ref program, value.type_id, state.layouts, return_signature.abi)) {
+                    if (state.return_pointer == 0) {
+                        return "indirect return has no saved destination";
+                    }
+                    let copy_error: String = x86_prepare_fixed_register(ref program, ref state, X86Register.R10, ref output);
+                    if (copy_error.length() != 0) { return copy_error; }
+                    x86_load_scalar(ref output, X86Register.R10, X86Register.RBP, state.return_pointer, 8, false);
+                    copy_error = x86_store_value(ref program, ref function, instruction.operands[0], X86Register.R10, 0, slots, ref state, ref output);
+                    if (copy_error.length() != 0) { return copy_error; }
+                    x86_mov_register64(ref output, X86Register.RAX, X86Register.R10);
+                } else {
+                    let classification: X86SysVTypeClass = x86_sysv_classify(ref program, value.type_id, state.layouts);
+                    let home: Int = x86_stack_offset(ref state.stack, instruction.operands[0]);
+                    let zero: Bool = value.kind == WirValueKind.Constant &&
+                        program.arena.constants[wir_id_index(value.owner)].kind == WirConstKind.Zero;
+                    let integer_index: Int = 0;
+                    let float_index: Int = 0;
+                    let part: Int = 0;
+                    while (part < classification.count) {
+                        let abi_class: X86SysVClass = classification.first;
+                        if (part == 1) { abi_class = classification.second; }
+                        let class_index: Int = integer_index;
+                        if (abi_class == X86SysVClass.SSE) {
+                            class_index = float_index;
+                            float_index++;
+                        } else {
+                            integer_index++;
+                        }
+                        let destination: X86Register = x86_sysv_return_register(class_index, abi_class);
+                        let part_size: Int = classification.size - part * 8;
+                        if (part_size > 8) { part_size = 8; }
+                        if (destination == X86Register.None || part_size <= 0) {
+                            return "native aggregate has no return register";
+                        }
+                        if (home != 0) {
+                            if (!x86_load_scalar(ref output, destination, X86Register.RBP, home + part * 8, part_size, false)) {
+                                return "cannot load a native aggregate return value";
+                            }
+                        } else if zero {
+                            if (abi_class == X86SysVClass.SSE) {
+                                x86_mov_register_imm32(ref output, X86Register.R10, 0U);
+                                if (!x86_sse_bits(ref output, destination, X86Register.R10, part_size, true)) {
+                                    return "cannot clear a native SSE return register";
+                                }
+                            } else {
+                                x86_mov_register_imm32(ref output, destination, 0U);
+                            }
+                        } else {
+                            return "native aggregate return value has no storage";
+                        }
+                        part++;
+                    }
+                }
+                if (frame_size > 0) { x86_frame_leave(ref output); }
+                x86_return(ref output);
+                return "";
+            }
             if (x86_wide_integer(ref program, value.type_id)) {
                 let home = x86_stack_offset(ref state.stack, instruction.operands[0]);
                 if (home != 0) {
@@ -3746,7 +3991,7 @@ func x86_lower_instruction(ref program: WirModule,
                 x86_return(ref output);
                 return "";
             }
-            if (x86_indirect_aggregate(ref program, value.type_id, state.layouts)) {
+            if (x86_indirect_return(ref program, value.type_id, state.layouts, return_signature.abi)) {
                 if (state.return_pointer == 0) {
                     return "indirect return has no saved destination";
                 }
@@ -3831,7 +4076,7 @@ func x86_lower_function_with_layouts(
         return x86_lowering_error("external functions do not have machine code");
     }
     let signature: WirType = program.arena.types[wir_id_index(UInt32(function.type_id))];
-    let indirect_return = x86_indirect_aggregate(ref program, signature.result, layouts);
+    let indirect_return = x86_indirect_return(ref program, signature.result, layouts, signature.abi);
     let order: Vector(WirBlockID) = x86_block_order(function);
     if (order.length() == 0 || order.length() != function.blocks.length()) {
         return x86_lowering_error("the x86_64 lowering could not find the function entry block");

@@ -7,7 +7,15 @@ import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
 
 
 func wir_function_abi(ref types: WirTypeMap, info: FuncInfo) -> WirABI {
-    if (info.abi_name is null || info.abi_name.length() == 0) { return WirABI.White; }
+    if (info.abi_name is null || info.abi_name.length() == 0) {
+        // ExportLib is a native boundary, it cannot use an implementation ABI
+        // just because scalar arguments happen to use the same registers.
+        if ((info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+            return WirABI.C;
+        }
+
+        return WirABI.White;
+    }
     if (info.abi_name == "C" || info.abi_name == "c") { return WirABI.C; }
     if (info.abi_name == "system" || info.abi_name == "System" || info.abi_name == "SYSTEM") {
         return WirABI.System;
@@ -17,8 +25,10 @@ func wir_function_abi(ref types: WirTypeMap, info: FuncInfo) -> WirABI {
 }
 
 func wir_function_linkage(info: FuncInfo, abi: WirABI) -> WirLinkage {
+    if (info.base_name == "main" || (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+        return WirLinkage.Exported;
+    }
     if (abi != WirABI.White) { return WirLinkage.External; }
-    if (info.base_name == "main" || (info.ann_flags & FLAG_ANN_EXPORT) != 0) { return WirLinkage.Exported; }
     return WirLinkage.Internal;
 }
 
