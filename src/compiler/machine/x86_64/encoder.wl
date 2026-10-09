@@ -729,7 +729,9 @@ func x86_jump_if_rel32(ref output: X86CodeBuffer, opcode: X86Opcode) -> Int {
     else if (opcode == X86Opcode.Jnp) {
         code = Byte(139);
     }
-    else { return -1; }
+    else {
+        return -1;
+    }
 
     x86_emit_byte(ref output, Byte(15));
     x86_emit_byte(ref output, code);

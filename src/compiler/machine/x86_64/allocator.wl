@@ -656,7 +656,9 @@ func x86_spill_capacity(ref program: WirModule, order: Vector(WirBlockID), ref u
         block_index++;
     }
 
-    if (instruction_count == 0) { return 0; }
+    if (instruction_count == 0) {
+        return 0;
+    }
 
     let before_changes: Vector(Int) = [];
     let after_changes: Vector(Int) = [];

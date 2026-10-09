@@ -70,10 +70,14 @@ func lower_program_to_machine(
     }
     let object: Vector(Byte) = [];
     if (target == "x86_64-unknown-linux-gnu") {
-        if verbose { print("Encoding ELF object"); }
+        if verbose {
+            print("Encoding ELF object");
+        }
         object = elf_object(X86Object(sections=machine.sections, symbols=machine.symbols, relocations=machine.relocations))?;
     } else {
-        if verbose { print("Encoding COFF object"); }
+        if verbose {
+            print("Encoding COFF object");
+        }
         object = coff_object(X86Object(sections=machine.sections, symbols=machine.symbols, relocations=machine.relocations))?;
     }
     catch(err) {

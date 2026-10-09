@@ -128,6 +128,7 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
         }
         i++;
     }
+
     i = 0;
     while (i < input.symbols.length()) {
         let symbol: X86Symbol = input.symbols[i];
@@ -159,6 +160,7 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
         counts.append(0);
         i++;
     }
+
     i = 0;
     while (i < input.relocations.length()) {
         let relocation: X86Relocation = input.relocations[i];
@@ -196,6 +198,7 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
         offset += Long(input.sections[i].bytes.length());
         relocation_offsets.append(UInt32(offset));
         offset += Long(counts[i]) * 10L;
+
         if (counts[i] > 65535) { offset += 10L; }
         if (offset > 2147483647L) {
             throw Error.Overflow;
@@ -230,18 +233,23 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
         coff_emit_u32(ref output, UInt32(section.bytes.length()));
         if (section.bytes.length() == 0) {
             coff_emit_u32(ref output, 0U);
+        } else {
+            coff_emit_u32(ref output, raw_offsets[i]);
         }
-        else { coff_emit_u32(ref output, raw_offsets[i]); }
         if (counts[i] == 0) {
             coff_emit_u32(ref output, 0U);
+        } else {
+            coff_emit_u32(ref output, relocation_offsets[i]);
         }
-        else { coff_emit_u32(ref output, relocation_offsets[i]); }
         coff_emit_u32(ref output, 0U);
+
         if (counts[i] > 65535) {
             coff_emit_u16(ref output, 65535U);
+        } else {
+            coff_emit_u16(ref output, UInt32(counts[i]));
         }
-        else { coff_emit_u16(ref output, UInt32(counts[i])); }
         coff_emit_u16(ref output, 0U);
+
         let flags: UInt32 = 1073741888U;
 
         if (section.executable) { flags = 1610612768U; }
@@ -261,12 +269,14 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
             output.append(section.bytes[j]);
             j++;
         }
+
         // the overflow record counts itself but is not a relocation to be applied
         if (counts[i] > 65535) {
             coff_emit_u32(ref output, UInt32(counts[i]) + 1U);
             coff_emit_u32(ref output, 0U);
             coff_emit_u16(ref output, 0U);
         }
+
         j = 0;
         while (j < input.relocations.length()) {
             let relocation: X86Relocation = input.relocations[j];
@@ -308,20 +318,25 @@ func coff_object(input: X86Object) -> Vector(Byte)? {
 
         if (section < 0) {
             coff_emit_u32(ref output, 0U);
+        } else {
+            coff_emit_u32(ref output, symbol.offset);
         }
-        else { coff_emit_u32(ref output, symbol.offset); }
         coff_emit_u16(ref output, UInt32(section + 1));
+
         if (symbol.section == ".text") {
             coff_emit_u16(ref output, 32U);
+        } else {
+            coff_emit_u16(ref output, 0U);
         }
-        else { coff_emit_u16(ref output, 0U); }
         if (symbol.external) {
             output.append(Byte(2));
+        } else {
+            output.append(Byte(3));
         }
-        else { output.append(Byte(3)); }
         output.append(Byte(0));
         i++;
     }
+
     coff_emit_u32(ref output, UInt32(string_table_size));
     i = 0;
     while (i < long_names.length()) {

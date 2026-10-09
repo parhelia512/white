@@ -1,6 +1,9 @@
 // src/compiler/machine/x86_64/sse.wl
 import * from "model.wl"
-import X86CodeBuffer, x86_emit_byte, x86_emit_i32, x86_register_code, x86_register_extended, x86_mov_register64, x86_mov_register32, x86_mov_register_imm64, x86_mov_register_imm32, x86_bitwise_register_imm32, x86_shift_register_imm8, x86_or_register_width, x86_test_register_width, x86_jump_if_rel32, x86_jump_rel32, x86_patch_i32 from "encoder.wl"
+import X86CodeBuffer, x86_emit_byte, x86_emit_i32, x86_register_code, x86_register_extended from "encoder.wl"
+import x86_mov_register64, x86_mov_register32, x86_mov_register_imm64, x86_mov_register_imm32 from "encoder.wl"
+import x86_bitwise_register_imm32, x86_shift_register_imm8, x86_or_register_width, x86_test_register_width from "encoder.wl"
+import x86_jump_if_rel32, x86_jump_rel32, x86_patch_i32 from "encoder.wl"
 
 
 func x86_xmm_code(register: X86Register) -> Int {
@@ -128,7 +131,8 @@ func x86_sse_compare(ref output: X86CodeBuffer, left: X86Register, right: X86Reg
 
 func x86_sse_convert(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, float_size: Int, integer_size: Int, to_float: Bool) -> Bool {
 // convert between a scalar integer register and an SSE value
-// CVTT truncates independently of MXCSR, integer inputs have already been extended.
+
+    // CVTT truncates independently of MXCSR, integer inputs have already been extended.
     let reg: Int = x86_register_code(destination);
     let rm = x86_xmm_code(source);
     let opcode = 44;
@@ -160,14 +164,17 @@ func x86_sse_convert(ref output: X86CodeBuffer, destination: X86Register, source
 
 func x86_uint64_to_float(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, half: X86Register, low_bit: X86Register, size: Int) -> Bool {
 // convert an unsigned 64-bit integer without asking the runtime for a helper
-// above INT64_MAX, convert (x >> 1) | (x & 1), then double
-// retaining the low bit prevents rounding a value just above a tie downwards.
+
+    // above INT64_MAX, convert (x >> 1) | (x & 1), then double,
+    // retaining the low bit prevents rounding a value just above a tie downwards.
     if (source == half || source == low_bit || half == low_bit || x86_register_code(source) < 0 ||
         x86_register_code(half) < 0 || x86_register_code(low_bit) < 0 ||
         x86_xmm_code(destination) < 0 || (size != 4 && size != 8)) {
         return false;
     }
+
     x86_test_register_width(ref output, source, source, true);
+
     let small: Int = x86_jump_if_rel32(ref output, X86Opcode.Jge);
     x86_mov_register64(ref output, half, source);
     x86_mov_register32(ref output, low_bit, source);
@@ -182,16 +189,21 @@ func x86_uint64_to_float(ref output: X86CodeBuffer, destination: X86Register, so
 
     let done: Int = x86_jump_rel32(ref output);
 
-    if (!x86_patch_i32(ref output, small, output.bytes.length() - (small + 4))) { return false; }
-    if (!x86_sse_convert(ref output, destination, source, size, 8, true)) { return false; }
+    if (!x86_patch_i32(ref output, small, output.bytes.length() - (small + 4))) {
+        return false;
+    }
+    if (!x86_sse_convert(ref output, destination, source, size, 8, true)) {
+        return false;
+    }
 
     return x86_patch_i32(ref output, done, output.bytes.length() - (done + 4));
 }
 
 func x86_float_to_uint64(ref output: X86CodeBuffer, destination: X86Register, source: X86Register, threshold: X86Register, temporary: X86Register, size: Int) -> Bool {
 // convert a scalar float to UInt64 without a compiler runtime call
-// source is scratch, its allocator binding must be preserved before emission.
-// subtracting 2^63 is exact in the upper half of the valid u64 range.
+
+    // source is scratch, its allocator binding must be preserved before emission,
+    // subtracting 2^63 is exact in the upper half of the valid u64 range.
     if (source == threshold || destination == temporary || x86_xmm_code(source) < 0 || x86_xmm_code(threshold) < 0 ||
         x86_register_code(destination) < 0 || x86_register_code(temporary) < 0 ||
         (size != 4 && size != 8)) {
@@ -221,8 +233,12 @@ func x86_float_to_uint64(ref output: X86CodeBuffer, destination: X86Register, so
 
     let done: Int = x86_jump_rel32(ref output);
 
-    if (!x86_patch_i32(ref output, small, output.bytes.length() - (small + 4))) { return false; }
-    if (!x86_sse_convert(ref output, destination, source, size, 8, false)) { return false; }
+    if (!x86_patch_i32(ref output, small, output.bytes.length() - (small + 4))) {
+        return false;
+    }
+    if (!x86_sse_convert(ref output, destination, source, size, 8, false)) {
+        return false;
+    }
 
     return x86_patch_i32(ref output, done, output.bytes.length() - (done + 4));
 }
