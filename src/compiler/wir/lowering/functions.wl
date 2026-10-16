@@ -16,6 +16,7 @@ import find_interface_implementation from "../../analysis.wl"
 import parse_const_uint128, parse_decimal_float_literal, eval_const_long from "../../constants.wl"
 import class_has_interface, is_unsuffix_int_literal, bind_call_args, bind_native_args, bind_callable_args, callable_types_compatible, is_ref_binding_init, expr_root_name from "../../validation.wl"
 import is_typed_dict, is_dict_key_type from "../../lowering/dictionary.wl"
+import check_equality_operands, check_equality_fallback, check_identity_operand from "../../validation.wl"
 import validate_explicit_literal_cast from "../../lowering/casts.wl"
 import target_intrinsic_symbol, target_value, fold_target_cond from "../../target_eval.wl"
 import * from "../../../frontend/ast.wl"
@@ -2408,9 +2409,13 @@ func wir_cast_expr(
     return WirExpr(value=wir_cast(ref program, state.block, value.value, target_wir, "", no_wir_location()), source_type=target_type);
 }
 
-func wir_identity_operand(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID) -> WirExpr {
+func wir_identity_operand(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, node: NodeID, pos: Position) -> WirExpr {
     let value: WirExpr = wir_lower_expr(ref state, ref types, ref source, ref program, node);
     if (value.value == NO_WIR_VALUE) {
+        return wir_no_expr();
+    }
+
+    if (!check_identity_operand(ref source, value.source_type, pos)) {
         return wir_no_expr();
     }
 
@@ -6678,8 +6683,8 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
     }
     if (kind == NODE_IS || kind == NODE_IS_NOT) {
         let identity: BinOpNode = get_binop_node(ref source.arena, node);
-        let left: WirExpr = wir_identity_operand(ref state, ref types, ref source, ref program, identity.left);
-        let right: WirExpr = wir_identity_operand(ref state, ref types, ref source, ref program, identity.right);
+        let left: WirExpr = wir_identity_operand(ref state, ref types, ref source, ref program, identity.left, identity.pos);
+        let right: WirExpr = wir_identity_operand(ref state, ref types, ref source, ref program, identity.right, identity.pos);
         if (left.value == NO_WIR_VALUE || right.value == NO_WIR_VALUE) {
             return wir_no_expr();
         }
@@ -6818,6 +6823,10 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         }
         let left_repr: Int = get_repr_type(ref source, left.source_type);
         let right_repr: Int = get_repr_type(ref source, right.source_type);
+        if ((binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE) &&
+            !check_equality_operands(ref source, left_repr, right_repr, binary.pos)) {
+            return wir_no_expr();
+        }
         if (binary.op_tok.type == TOK_PLUS && (left_repr == TYPE_STRING || right_repr == TYPE_STRING)) {
             let result_type: Int = TYPE_STRING;
             if (left.source_type == right.source_type && left_repr == TYPE_STRING) {
@@ -6881,6 +6890,10 @@ func wir_lower_expr(ref state: WirFunctionLowering, ref types: WirTypeMap, ref s
         if (protocol_comparison.handled) {
             wir_cleanup_temporaries(ref state, ref source, ref program, owned_start);
             return protocol_comparison.value;
+        }
+        if ((binary.op_tok.type == TOK_EE || binary.op_tok.type == TOK_NE) &&
+            !check_equality_fallback(ref source, left_repr, right_repr, binary.pos)) {
+            return wir_no_expr();
         }
         if (binary.op_tok.type == TOK_POW) {
             if (!wir_source_numeric(left_repr) || !wir_source_numeric(right_repr)) {
