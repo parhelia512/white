@@ -278,6 +278,7 @@ struct Compiler(
     curr_func: FuncInfo,
     expected_type: Int,
     hoist_scope: Scope,
+    hoist_scope_stack: Vector(Scope),
     type_drop_list: Vector(Struct),
     global_buffer: String,
     string_pool: Dict(String, StringConstant),
@@ -456,6 +457,7 @@ func new_compiler(out_path: String, is_shared: Bool, emit_source_context: Bool, 
         curr_func = FuncInfo(),
         expected_type = 0,
         hoist_scope = Scope(table=null, parent=-1, gc_vars=null, depth=0),
+        hoist_scope_stack = [],
         type_drop_list = [],
         global_buffer = "",
         string_pool = Dict(),
@@ -2032,8 +2034,8 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
         while (h_curr.table is !null) {
             let h_info: SymbolInfo = h_curr.table.lookup(v.name_tok.value);
             if (has_symbol(h_info)) { return h_info.type; }
-            if (h_curr.parent < 0) { break; }
-            h_curr = c.scope_stack[h_curr.parent];
+            if (h_curr.parent < 0 || c.hoist_scope_stack is null || h_curr.parent >= c.hoist_scope_stack.length()) { break; }
+            h_curr = c.hoist_scope_stack[h_curr.parent];
         }
 
         if (c.func_table is !null) {
@@ -2272,7 +2274,21 @@ func get_expr_type(ref c: Compiler, node: NodeID) -> Int {
             }
 
             let f_info: FuncInfo = c.func_table.lookup(callee_name);
-            if (!has_func(f_info) && c.current_package_prefix != "") { f_info = c.func_table.lookup(c.current_package_prefix + callee_name); }
+            if (!has_func(f_info) && c.current_package_prefix != "") {
+                f_info = c.func_table.lookup(c.current_package_prefix + callee_name);
+            }
+            if (!has_func(f_info) && c.current_file_func_aliases is !null) {
+                let mapped: String = c.current_file_func_aliases.lookup(callee_name);
+                if (mapped is !null) {
+                    f_info = c.func_table.lookup(mapped);
+                }
+            }
+            if (!has_func(f_info) && c.global_func_aliases is !null) {
+                let mapped: String = c.global_func_aliases.lookup(callee_name);
+                if (mapped is !null) {
+                    f_info = c.func_table.lookup(mapped);
+                }
+            }
             if (has_func(f_info)) { return f_info.ret_type; }
 
             let s_info: StructInfo = c.struct_table.lookup(callee_name);
