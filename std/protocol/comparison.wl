@@ -1,3 +1,4 @@
+// std/protocol/comparison.wl
 // comparison contracts used by generic algorithms and ordered collections
 
 enum Ordering {

@@ -8,6 +8,7 @@ import "internal/platform/errors" as platform_errors
 import Error as CoreError from "errors"
 import Error as IoError from "../../io/errors.wl"
 
+
 const STDIN: Int = 0;
 const STDOUT: Int = 1;
 const STDERR: Int = 2;
@@ -29,9 +30,15 @@ func __from_platform(kind: platform_errors.Kind) -> IoError {
 }
 
 func __windows_handle(stream: Int) -> AnyPtr {
-    if (stream == STDIN) { return windows.GetStdHandle(windows.STD_INPUT_HANDLE); }
-    if (stream == STDOUT) { return windows.GetStdHandle(windows.STD_OUTPUT_HANDLE); }
-    if (stream == STDERR) { return windows.GetStdHandle(windows.STD_ERROR_HANDLE); }
+    if (stream == STDIN) {
+        return windows.GetStdHandle(windows.STD_INPUT_HANDLE);
+    }
+    if (stream == STDOUT) {
+        return windows.GetStdHandle(windows.STD_OUTPUT_HANDLE);
+    }
+    if (stream == STDERR) {
+        return windows.GetStdHandle(windows.STD_ERROR_HANDLE);
+    }
     return nullptr;
 }
 
@@ -61,23 +68,23 @@ func read(stream: Int, data: AnyPtr, length: Int) -> Int? {
 
     if (sys.OS == sys.Os.Windows) {
         let handle: AnyPtr = __windows_handle(stream);
-        if (windows.is_invalid_handle(handle)) { throw IoError.InvalidStream; }
+        if (windows.is_invalid_handle(handle)) {
+            throw IoError.InvalidStream;
+        }
         __prepare_windows_stream(stream, handle);
 
         let bytes_read: Int = 0;
-        if (windows.ReadFile(handle, data, length, ref bytes_read, nullptr) != 0) {
-            return bytes_read;
-        }
+        if (windows.ReadFile(handle, data, length, ref bytes_read, nullptr) != 0) { return bytes_read; }
         let code: Int = windows.GetLastError();
-        if (code == windows.ERROR_HANDLE_EOF || code == windows.ERROR_BROKEN_PIPE) {
-            return 0;
-        }
+        if (code == windows.ERROR_HANDLE_EOF || code == windows.ERROR_BROKEN_PIPE) { return 0; }
         throw __from_platform(platform_errors.from_windows(code));
     }
 
     while true {
         let count: IntSize = posix.read(0, data, UIntSize(length));
-        if (count >= IntSize(0)) { return Int(count); }
+        if (count >= IntSize(0)) {
+            return Int(count);
+        }
         let err: platform_errors.Kind = platform_errors.last();
         if (err != platform_errors.Kind.Interrupted) { throw __from_platform(err); }
     }
@@ -92,7 +99,9 @@ func write(stream: Int, data: AnyPtr, length: Int) -> Int? {
 
     if (sys.OS == sys.Os.Windows) {
         let handle: AnyPtr = __windows_handle(stream);
-        if (windows.is_invalid_handle(handle)) { throw IoError.InvalidStream; }
+        if (windows.is_invalid_handle(handle)) {
+            throw IoError.InvalidStream;
+        }
         __prepare_windows_stream(stream, handle);
 
         let bytes_written: Int = 0;
@@ -106,7 +115,10 @@ func write(stream: Int, data: AnyPtr, length: Int) -> Int? {
     if (stream == STDERR) { fd = 2; }
     while true {
         let count: IntSize = posix.write(fd, data, UIntSize(length));
-        if (count >= IntSize(0)) { return Int(count); }
+
+        if (count >= IntSize(0)) {
+            return Int(count);
+        }
         let err: platform_errors.Kind = platform_errors.last();
         if (err != platform_errors.Kind.Interrupted) { throw __from_platform(err); }
     }
@@ -114,12 +126,16 @@ func write(stream: Int, data: AnyPtr, length: Int) -> Int? {
 
 func write_all(stream: Int, data: AnyPtr, length: Int) -> Void? {
 // keep writing until the entire buffer reaches the stream
-    if (length < 0 || (length > 0 && data is nullptr)) { throw CoreError.InvalidArgument; }
+    if (length < 0 || (length > 0 && data is nullptr)) {
+        throw CoreError.InvalidArgument;
+    }
     let ptr bytes: Byte = data;
     let offset: Int = 0;
     while (offset < length) {
         let count: Int = write(stream, ref bytes[offset], length - offset)?;
-        if (count == 0) { throw IoError.WriteZero; }
+        if (count == 0) {
+            throw IoError.WriteZero;
+        }
         offset += count;
     }
     return;
@@ -127,6 +143,8 @@ func write_all(stream: Int, data: AnyPtr, length: Int) -> Void? {
 
 func flush(stream: Int) -> Void? {
 // standard streams are currently unbuffered at this layer
-    if (stream != STDOUT && stream != STDERR) { throw CoreError.InvalidArgument; }
+    if (stream != STDOUT && stream != STDERR) {
+        throw CoreError.InvalidArgument;
+    }
     return;
 }

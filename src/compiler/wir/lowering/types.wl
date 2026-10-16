@@ -1,11 +1,16 @@
-// compiler/wir/lowering/types.wl
+// src/compiler/wir/lowering/types.wl
 import * from "../model.wl"
 import * from "../builder.wl"
+import wir_layout_type, wir_invalid_type_layout from "../layout.wl"
 import * from "../../context.wl"
 import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
 
+
 struct WirTypeMap(
     cache: Vector(WirTypeID),
+    layout_states: Vector(Int),
+    layouts: Vector(WirTypeLayout),
+    layout_revision: Int,
     errors: Vector(String),
     opaque_pointer: WirTypeID,
     string_type: WirTypeID,
@@ -20,7 +25,30 @@ struct WirTypeMap(
 struct WirEnumValue(source_type: Int, value: Long)
 
 func new_wir_type_map() -> WirTypeMap {
-    return WirTypeMap(cache=[], errors=[], opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE, string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE, string_values=Dict(), string_count=0, error_type=NO_WIR_TYPE, enum_values=Dict());
+    return WirTypeMap(
+        cache=[], layout_states=[], layouts=[], layout_revision=-1, errors=[],
+        opaque_pointer=NO_WIR_TYPE, string_type=NO_WIR_TYPE,
+        string_record=NO_WIR_TYPE, string_object=NO_WIR_TYPE,
+        string_values=Dict(), string_count=0,
+        error_type=NO_WIR_TYPE, enum_values=Dict()
+    );
+}
+
+func wir_lowering_layout(ref types: WirTypeMap, program: WirModule, type_id: WirTypeID) -> WirTypeLayout {
+// completing a forward declaration invalidates layouts that depend on it
+    if (types.layout_revision != program.arena.type_revision) {
+        let i = 0;
+        while (i < types.layout_states.length()) {
+            types.layout_states[i] = 0;
+            i++;
+        }
+        types.layout_revision = program.arena.type_revision;
+    }
+    while (types.layouts.length() < program.arena.types.length()) {
+        types.layout_states.append(0);
+        types.layouts.append(wir_invalid_type_layout());
+    }
+    return wir_layout_type(program, type_id, types.layout_states, types.layouts);
 }
 
 func wir_prepare_type_slot(ref types: WirTypeMap, source_type: Int) -> Void {
@@ -46,7 +74,9 @@ func wir_type_failure(ref types: WirTypeMap, source_type: Int, context: String =
 }
 
 func wir_opaque_pointer(ref types: WirTypeMap, ref program: WirModule) -> WirTypeID {
-    if (types.opaque_pointer == NO_WIR_TYPE) { types.opaque_pointer = wir_pointer_type(ref program, program.void_type); }
+    if (types.opaque_pointer == NO_WIR_TYPE) {
+        types.opaque_pointer = wir_pointer_type(ref program, program.void_type);
+    }
     return types.opaque_pointer;
 }
 
@@ -59,7 +89,9 @@ func wir_callable_signature(ref types: WirTypeMap, ref source: Compiler, ref pro
     if (result == NO_WIR_TYPE) { return NO_WIR_TYPE; }
 
     let parameters: Vector(WirTypeID) = [];
-    if (with_context) { parameters.append(wir_opaque_pointer(ref types, ref program)); }
+    if with_context {
+        parameters.append(wir_opaque_pointer(ref types, ref program));
+    }
     let i: Int = 0;
     while (signature.func_arg_types is !null && i < signature.func_arg_types.length()) {
         let parameter: TypeListNode = signature.func_arg_types[i];
@@ -119,7 +151,9 @@ func wir_dispatch_table_type(ref types: WirTypeMap, ref program: WirModule, leng
 
 func wir_class_vtable_name(info: StructInfo) -> String {
     if (info.vtable_name is !null && info.vtable_name.length() > 0) {
-        if (info.vtable_name[0] == '@') { return info.vtable_name.slice(1, info.vtable_name.length()); }
+        if (info.vtable_name[0] == '@') {
+            return info.vtable_name.slice(1, info.vtable_name.length());
+        }
         return info.vtable_name;
     }
     return "vtable." + info.name;
@@ -130,7 +164,9 @@ func wir_interface_table_name(class_info: StructInfo, interface_info: StructInfo
 }
 
 func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, info: StructInfo) -> WirTypeID {
-    if (info.is_enum) { return wir_cache_type(ref types, source_type, wir_signed_int_type(ref program, 32)); }
+    if (info.is_enum) {
+        return wir_cache_type(ref types, source_type, wir_signed_int_type(ref program, 32));
+    }
 
     let record: WirTypeID = wir_declare_struct(ref program, info.name);
     let result: WirTypeID = record;
@@ -163,7 +199,9 @@ func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref prog
             fields.append(field_type);
             i++;
         }
-        if (fields.length() == 0) { fields.append(wir_unsigned_int_type(ref program, 8)); }
+        if (fields.length() == 0) {
+            fields.append(wir_unsigned_int_type(ref program, 8));
+        }
     }
     wir_define_struct(ref program, record, fields);
     return result;
@@ -172,7 +210,9 @@ func wir_lower_struct_type(ref types: WirTypeMap, ref source: Compiler, ref prog
 func wir_lower_array_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int, info: ArrayInfo) -> WirTypeID {
     let element: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, info.base_type);
     if (element == NO_WIR_TYPE) { return NO_WIR_TYPE; }
-    if (info.size >= 0) { return wir_cache_type(ref types, source_type, wir_array_type(ref program, element, UIntSize(info.size))); }
+    if (info.size >= 0) {
+        return wir_cache_type(ref types, source_type, wir_array_type(ref program, element, UIntSize(info.size)));
+    }
 
     let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
     let pointer: WirTypeID = wir_pointer_type(ref program, element);
@@ -182,40 +222,84 @@ func wir_lower_array_type(ref types: WirTypeMap, ref source: Compiler, ref progr
 }
 
 func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, source_type: Int) -> WirTypeID {
-    if (source_type <= 0) { return wir_type_failure(ref types, source_type, "module '" + source.current_package_prefix + "'"); }
+    if (source_type <= 0) {
+        return wir_type_failure(ref types, source_type, "module '" + source.current_package_prefix + "'");
+    }
     let cached: WirTypeID = wir_cached_type(ref types, source_type);
     if (cached != NO_WIR_TYPE) { return cached; }
 
     let result: WirTypeID = NO_WIR_TYPE;
     if (source_type == TYPE_VOID) { result = program.void_type; }
     else if (source_type == TYPE_BOOL) { result = program.bool_type; }
-    else if (source_type == TYPE_BYTE) { result = wir_unsigned_int_type(ref program, 8); }
-    else if (source_type == TYPE_INT8) { result = wir_signed_int_type(ref program, 8); }
-    else if (source_type == TYPE_INT16) { result = wir_signed_int_type(ref program, 16); }
-    else if (source_type == TYPE_INT) { result = wir_signed_int_type(ref program, 32); }
-    else if (source_type == TYPE_LONG) { result = wir_signed_int_type(ref program, 64); }
-    else if (source_type == TYPE_INT128) { result = wir_signed_int_type(ref program, 128); }
-    else if (source_type == TYPE_UINT16) { result = wir_unsigned_int_type(ref program, 16); }
-    else if (source_type == TYPE_UINT32 || source_type == TYPE_CHAR) { result = wir_unsigned_int_type(ref program, 32); }
-    else if (source_type == TYPE_UINT64) { result = wir_unsigned_int_type(ref program, 64); }
-    else if (source_type == TYPE_UINT128) { result = wir_unsigned_int_type(ref program, 128); }
-    else if (source_type == TYPE_INTSIZE) { result = wir_signed_int_type(ref program, program.pointer_bits); }
-    else if (source_type == TYPE_UINTSIZE) { result = wir_unsigned_int_type(ref program, program.pointer_bits); }
-    else if (source_type == TYPE_FLOAT32) { result = wir_float_type(ref program, 32); }
-    else if (source_type == TYPE_FLOAT) { result = wir_float_type(ref program, 64); }
-    else if (source_type == TYPE_STRING) { result = wir_string_layout(ref types, ref program); }
-    else if (source_type == TYPE_ANY_ERROR) { result = wir_error_layout(ref types, ref program); }
-    else if (source_type == TYPE_ANYPTR || source_type == TYPE_NULLPTR || source_type == TYPE_NULL) { result = wir_opaque_pointer(ref types, ref program); }
-    else if (source_type == TYPE_GENERIC_ENUM) { result = wir_signed_int_type(ref program, 32); }
-    else if (source_type == TYPE_GENERIC_STRUCT || source_type == TYPE_GENERIC_CLASS || source_type == TYPE_GENERIC_FUNCTION || source_type == TYPE_GENERIC_METHOD) { result = wir_opaque_pointer(ref types, ref program); }
-    if (result != NO_WIR_TYPE) { return wir_cache_type(ref types, source_type, result); }
+    else if (source_type == TYPE_BYTE) {
+        result = wir_unsigned_int_type(ref program, 8);
+    }
+    else if (source_type == TYPE_INT8) {
+        result = wir_signed_int_type(ref program, 8);
+    }
+    else if (source_type == TYPE_INT16) {
+        result = wir_signed_int_type(ref program, 16);
+    }
+    else if (source_type == TYPE_INT) {
+        result = wir_signed_int_type(ref program, 32);
+    }
+    else if (source_type == TYPE_LONG) {
+        result = wir_signed_int_type(ref program, 64);
+    }
+    else if (source_type == TYPE_INT128) {
+        result = wir_signed_int_type(ref program, 128);
+    }
+    else if (source_type == TYPE_UINT16) {
+        result = wir_unsigned_int_type(ref program, 16);
+    }
+    else if (source_type == TYPE_UINT32 || source_type == TYPE_CHAR) {
+        result = wir_unsigned_int_type(ref program, 32);
+    }
+    else if (source_type == TYPE_UINT64) {
+        result = wir_unsigned_int_type(ref program, 64);
+    }
+    else if (source_type == TYPE_UINT128) {
+        result = wir_unsigned_int_type(ref program, 128);
+    }
+    else if (source_type == TYPE_INTSIZE) {
+        result = wir_signed_int_type(ref program, program.pointer_bits);
+    }
+    else if (source_type == TYPE_UINTSIZE) {
+        result = wir_unsigned_int_type(ref program, program.pointer_bits);
+    }
+    else if (source_type == TYPE_FLOAT32) {
+        result = wir_float_type(ref program, 32);
+    }
+    else if (source_type == TYPE_FLOAT) {
+        result = wir_float_type(ref program, 64);
+    }
+    else if (source_type == TYPE_STRING) {
+        result = wir_string_layout(ref types, ref program);
+    }
+    else if (source_type == TYPE_ANY_ERROR) {
+        result = wir_error_layout(ref types, ref program);
+    }
+    else if (source_type == TYPE_ANYPTR || source_type == TYPE_NULLPTR || source_type == TYPE_NULL) {
+        result = wir_opaque_pointer(ref types, ref program);
+    }
+    else if (source_type == TYPE_GENERIC_ENUM) {
+        result = wir_signed_int_type(ref program, 32);
+    }
+    else if (source_type == TYPE_GENERIC_STRUCT || source_type == TYPE_GENERIC_CLASS || source_type == TYPE_GENERIC_FUNCTION || source_type == TYPE_GENERIC_METHOD) {
+        result = wir_opaque_pointer(ref types, ref program);
+    }
+    if (result != NO_WIR_TYPE) {
+        return wir_cache_type(ref types, source_type, result);
+    }
 
     let key: String = "" + source_type;
     if (source.named_type_ids is !null) {
         let named: NamedTypeInfo = source.named_type_ids.lookup(key);
         if (has_named_type(named)) {
             result = wir_lower_source_type(ref types, ref source, ref program, named.underlying_type);
-            if (result != NO_WIR_TYPE) { return wir_cache_type(ref types, source_type, result); }
+            if (result != NO_WIR_TYPE) {
+                return wir_cache_type(ref types, source_type, result);
+            }
             return NO_WIR_TYPE;
         }
     }
@@ -229,7 +313,9 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
     }
     if (source.array_info_map is !null) {
         let array: ArrayInfo = source.array_info_map.lookup(key);
-        if (has_array_info(array)) { return wir_lower_array_type(ref types, ref source, ref program, source_type, array); }
+        if (has_array_info(array)) {
+            return wir_lower_array_type(ref types, ref source, ref program, source_type, array);
+        }
     }
     if (source.vector_base_map is !null) {
         let vector: SymbolInfo = source.vector_base_map.lookup(key);
@@ -259,11 +345,17 @@ func wir_lower_source_type(ref types: WirTypeMap, ref source: Compiler, ref prog
             return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
         }
     }
-    if (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(key))) { return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program)); }
+    if (source.method_ret_map is !null && has_symbol(source.method_ret_map.lookup(key))) {
+        return wir_cache_type(ref types, source_type, wir_opaque_pointer(ref types, ref program));
+    }
     if (source.struct_id_map is !null) {
         let info: StructInfo = source.struct_id_map.lookup(key);
-        if (has_struct(info)) { return wir_lower_struct_type(ref types, ref source, ref program, source_type, info); }
+        if (has_struct(info)) {
+            return wir_lower_struct_type(ref types, ref source, ref program, source_type, info);
+        }
     }
-    if (source_type == TYPE_AUTO || source_type == TYPE_POISON) { return wir_type_failure(ref types, source_type); }
+    if (source_type == TYPE_AUTO || source_type == TYPE_POISON) {
+        return wir_type_failure(ref types, source_type);
+    }
     return wir_type_failure(ref types, source_type);
 }

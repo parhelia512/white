@@ -5,7 +5,9 @@ import StringError from "errors.wl"
 import "internal/runtime/memory" as memory
 import "internal/runtime/string" as runtime_string
 
+
 class Builder {
+// grows one UTF-8 buffer and turns it into an ordinary String when build is called
     let __storage: String = null;
     let __length: Int = 0;
     let __capacity: Int = 0;
@@ -20,10 +22,12 @@ class Builder {
     }
 
     func __reserve(additional: Int) -> Void? {
-        // grow geometrically so a sequence of writes stays linear
+    // grow geometrically so a sequence of writes stays linear
         if (additional < 0 || self.__length > 2147483647 - additional) { throw Error.Overflow; }
         let required: Int = self.__length + additional;
-        if (required <= self.__capacity) { return; }
+        if (required <= self.__capacity) {
+            return;
+        }
 
         let capacity: Int = self.__capacity;
         if (capacity < 64) { capacity = 64; }
@@ -36,8 +40,12 @@ class Builder {
         }
 
         let replacement: String = runtime_string.alloc(Long(capacity));
-        if (replacement is null) { throw Error.OutOfMemory; }
-        if (self.__length > 0) { memory.mem_copy(runtime_string.data(replacement), runtime_string.data(self.__storage), UIntSize(self.__length)); }
+        if (replacement is null) {
+            throw Error.OutOfMemory;
+        }
+        if (self.__length > 0) {
+            memory.mem_copy(runtime_string.data(replacement), runtime_string.data(self.__storage), UIntSize(self.__length));
+        }
         runtime_string.set_length(replacement, self.__length);
         self.__storage = replacement;
         self.__capacity = capacity;
@@ -45,12 +53,16 @@ class Builder {
     }
 
     func reserve(additional: Int) -> Void? {
+    // reserve room beyond the current length, existing bytes are left untouched
         self.__reserve(additional)?;
         return;
     }
 
     func write(value: String) -> Void? {
-        if (value is null) { throw Error.InvalidArgument; }
+    // append a complete UTF-8 string
+        if (value is null) {
+            throw Error.InvalidArgument;
+        }
         let length: Int = value.length();
         self.__reserve(length)?;
         if (length > 0) {
@@ -64,6 +76,7 @@ class Builder {
     }
 
     func write_byte(value: Byte) -> Void? {
+    // append one raw byte, build will reject the result if the final buffer is not UTF-8
         self.__reserve(1)?;
         let ptr bytes: Byte = runtime_string.data(self.__storage);
         bytes[self.__length] = value;
@@ -73,6 +86,7 @@ class Builder {
     }
 
     func write_char(value: Char) -> Void? {
+    // encode one Unicode scalar as UTF-8
         // encode directly into the backing buffer without a temporary String
         let scalar: Int = Int(value);
         if (scalar < 0 || scalar > 1114111 || (scalar >= 55296 && scalar <= 57343)) { throw StringError.InvalidCodePoint; }
@@ -130,7 +144,9 @@ class Builder {
         while true {
             bytes[pos] = Byte(Int(0L - (work % 10L)) + 48);
             work /= 10L;
-            if (work == 0L) { break; }
+            if (work == 0L) {
+                break;
+            }
             pos -= 1;
         }
         if negative { bytes[start] = Byte(45); }
@@ -154,7 +170,9 @@ class Builder {
         while true {
             bytes[pos] = Byte(Int(work % UInt64(10)) + 48);
             work /= UInt64(10);
-            if (work == UInt64(0)) { break; }
+            if (work == UInt64(0)) {
+                break;
+            }
             pos -= 1;
         }
         self.__length += digits;
@@ -175,13 +193,19 @@ class Builder {
     }
 
     func clear() -> Void {
+    // retain the allocation so the builder can be reused
         self.__length = 0;
-        if (self.__storage is !null) { runtime_string.set_length(self.__storage, 0); }
+        if (self.__storage is !null) {
+            runtime_string.set_length(self.__storage, 0);
+        }
     }
 
     func build() -> String? {
+    // finish the current contents without exposing spare capacity
         // detach the buffer so later writes cannot mutate the returned String
-        if (self.__storage is null) { throw Error.OutOfMemory; }
+        if (self.__storage is null) {
+            throw Error.OutOfMemory;
+        }
         runtime_string.set_length(self.__storage, self.__length);
         if (!self.__storage.is_valid_utf8()) { throw StringError.InvalidUtf8; }
 

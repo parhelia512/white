@@ -1,12 +1,14 @@
-// compiler/backend/windows.wl
+// src/compiler/backend/windows.wl
 import "sys"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "../target.wl"
 
+
 func emit_freestanding_memops(ref c: Compiler) -> Void {
 // volatile loops stop LLVM from turning these definitions back into CRT calls
     let size_ty: String = get_size_llvm_type();
+
     c.output_file.write("define i8* @memcpy(i8* %dest, i8* %src, " + size_ty + " %count) noinline optnone {\n");
     c.output_file.write("entry:\n");
     c.output_file.write("  br label %copy.cond\n\n");
@@ -97,6 +99,7 @@ func emit_windows_x86_division_builtins(ref c: Compiler) -> Void {
                 remainder := remainder - divisor
                 quotient := quotient | (1 << bit)
     */
+
     c.output_file.write("define internal void @__wl_udivrem64(i64 %dividend, i64 %divisor, i64* %quotient.out, i64* %remainder.out) noinline {\n");
     c.output_file.write("entry:\n");
     c.output_file.write("  %zero = icmp eq i64 %divisor, 0\n");
@@ -208,7 +211,8 @@ func emit_windows_x86_division_builtins(ref c: Compiler) -> Void {
 }
 
 func emit_windows_x86_stack_probe(ref c: Compiler) -> Void {
-    // x86 __chkstk probes the guard pages and returns on the allocated stack
+// x86 __chkstk probes the guard pages and returns on the allocated stack
+
     c.output_file.write("module asm \".text\"\n");
     c.output_file.write("module asm \".p2align 4, 0x90\"\n");
     c.output_file.write("module asm \".globl __chkstk\"\n");
@@ -235,7 +239,8 @@ func emit_windows_x86_stack_probe(ref c: Compiler) -> Void {
 }
 
 func emit_windows_x64_stack_probe(ref c: Compiler) -> Void {
-    // x64 callers adjust rsp after the probe returns
+// x64 callers adjust rsp after the probe returns
+
     c.output_file.write("module asm \".text\"\n");
     c.output_file.write("module asm \".p2align 4, 0x90\"\n");
     c.output_file.write("module asm \".globl __chkstk\"\n");
@@ -262,29 +267,43 @@ func emit_windows_x64_stack_probe(ref c: Compiler) -> Void {
 }
 
 func emit_windows_stack_probe(ref c: Compiler) -> Void {
-    // keep target assembly private to the Windows backend until structured asm is available
-    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_stack_probe(ref c); }
-    else if (get_target_arch() == sys.Arch.X86_64) { emit_windows_x64_stack_probe(ref c); }
+// keep target assembly private to the Windows backend until structured asm is available
+    if (get_target_arch() == sys.Arch.X86) {
+        emit_windows_x86_stack_probe(ref c);
+    }
+    else if (get_target_arch() == sys.Arch.X86_64) {
+        emit_windows_x64_stack_probe(ref c);
+    }
 }
 
 func emit_windows_abi(ref c: Compiler) -> Void {
-    if (get_target_os() != sys.Os.Windows) { return; }
+    if (get_target_os() != sys.Os.Windows) {
+        return;
+    }
+
     c.output_file.write("@_fltused = global i32 39029\n\n");
     c.output_file.write("define void @__main() {\nentry:\n  ret void\n}\n\n");
+
     emit_freestanding_memops(ref c);
-    if (get_target_arch() == sys.Arch.X86) { emit_windows_x86_division_builtins(ref c); }
+    if (get_target_arch() == sys.Arch.X86) {
+        emit_windows_x86_division_builtins(ref c);
+    }
     emit_windows_stack_probe(ref c);
 }
 
 func emit_windows_entrypoint(ref c: Compiler) -> Void {
-    if (get_target_os() != sys.Os.Windows) { return; }
+    if (get_target_os() != sys.Os.Windows) {
+        return;
+    }
     if (c.is_shared) {
         let callconv: String = "";
         if (get_target_arch() == sys.Arch.X86) { callconv = "x86_stdcallcc "; }
+
         c.output_file.write("define " + callconv + "i32 @DllMainCRTStartup(i8* %instance, i32 %reason, i8* %reserved) {\n");
         c.output_file.write("entry:\n");
         c.output_file.write("  ret i32 1\n");
         c.output_file.write("}\n\n");
+
         return;
     }
 
@@ -298,8 +317,10 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
 
     let argc: Int = 0;
     if (main_info.arg_types is !null) { argc = main_info.arg_types.length(); }
+
     c.output_file.write("define void @mainCRTStartup() {\n");
     c.output_file.write("entry:\n");
+
     if (argc == 0) {
         c.output_file.write("  %status = call i32 @main()\n");
     } else {
@@ -311,6 +332,7 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
             throw_internal_compiler_error(no_position(), "Missing compiler runtime hooks required by the Windows entry point.");
             return;
         }
+
         c.output_file.write("  %argc.addr = alloca i32\n");
         c.output_file.write("  store i32 0, i32* %argc.addr\n");
         c.output_file.write("  %argv.raw = call i8* @" + args_info.name + "(i32* %argc.addr)\n");
@@ -325,8 +347,8 @@ func emit_windows_entrypoint(ref c: Compiler) -> Void {
         c.output_file.write("  %status = call i32 @main(i32 %argc, %struct.$String** %argv)\n");
         c.output_file.write("  call void @" + free_info.name + "(i32 %argc, i8* %argv.raw)\n");
     }
+
     c.output_file.write("  call void @" + exit_info.name + "(i32 %status)\n");
     c.output_file.write("  unreachable\n");
     c.output_file.write("}\n\n");
 }
-

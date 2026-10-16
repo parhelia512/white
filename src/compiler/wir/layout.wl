@@ -1,6 +1,7 @@
-// compiler/wir/layout.wl
+// src/compiler/wir/layout.wl
 
 import * from "model.wl"
+
 
 func wir_invalid_data_layout() -> WirDataLayout {
     return WirDataLayout(valid=false, little_endian=true, pointer_bits=0, pointer_alignment=0, i64_alignment=0, i128_alignment=0, f64_alignment=0, stack_alignment=0);
@@ -37,34 +38,58 @@ func wir_align_size(value: UInt128, alignment: Int) -> UInt128 {
 }
 
 func wir_max_object_size(layout: WirDataLayout) -> UInt128 {
-    if (layout.pointer_bits != 32 && layout.pointer_bits != 64) { return UInt128(0U); }
+    if (layout.pointer_bits != 32 && layout.pointer_bits != 64) {
+        return UInt128(0U);
+    }
     return (UInt128(1U) << UInt128(layout.pointer_bits)) - UInt128(1U);
 }
 
 func wir_scalar_layout(program: WirModule, type: WirType) -> WirTypeLayout {
-    if (type.kind == WirTypeKind.BoolType) { return WirTypeLayout(valid=true, size=1UL, alignment=1, field_offsets=[]); }
+    if (type.kind == WirTypeKind.BoolType) {
+        return WirTypeLayout(valid=true, size=1UL, alignment=1, field_offsets=[]);
+    }
     if (type.kind == WirTypeKind.Pointer || type.kind == WirTypeKind.Function) {
         return WirTypeLayout(valid=true, size=UInt64(program.data_layout.pointer_bits / 8), alignment=program.data_layout.pointer_alignment, field_offsets=[]);
     }
     if (type.kind == WirTypeKind.FloatType) {
-        if (type.bits == 32) { return WirTypeLayout(valid=true, size=4UL, alignment=4, field_offsets=[]); }
-        if (type.bits == 64) { return WirTypeLayout(valid=true, size=8UL, alignment=program.data_layout.f64_alignment, field_offsets=[]); }
+        if (type.bits == 32) {
+            return WirTypeLayout(valid=true, size=4UL, alignment=4, field_offsets=[]);
+        }
+        if (type.bits == 64) {
+            return WirTypeLayout(valid=true, size=8UL, alignment=program.data_layout.f64_alignment, field_offsets=[]);
+        }
         return wir_invalid_type_layout();
     }
-    if (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) { return wir_invalid_type_layout(); }
+    if (type.kind != WirTypeKind.SignedInt && type.kind != WirTypeKind.UnsignedInt) {
+        return wir_invalid_type_layout();
+    }
     if (type.bits <= 0 || type.bits > 128) { return wir_invalid_type_layout(); }
-    if (type.bits <= 8) { return WirTypeLayout(valid=true, size=1UL, alignment=1, field_offsets=[]); }
-    if (type.bits <= 16) { return WirTypeLayout(valid=true, size=2UL, alignment=2, field_offsets=[]); }
-    if (type.bits <= 32) { return WirTypeLayout(valid=true, size=4UL, alignment=4, field_offsets=[]); }
-    if (type.bits <= 64) { return WirTypeLayout(valid=true, size=8UL, alignment=program.data_layout.i64_alignment, field_offsets=[]); }
+    if (type.bits <= 8) {
+        return WirTypeLayout(valid=true, size=1UL, alignment=1, field_offsets=[]);
+    }
+    if (type.bits <= 16) {
+        return WirTypeLayout(valid=true, size=2UL, alignment=2, field_offsets=[]);
+    }
+    if (type.bits <= 32) {
+        return WirTypeLayout(valid=true, size=4UL, alignment=4, field_offsets=[]);
+    }
+    if (type.bits <= 64) {
+        return WirTypeLayout(valid=true, size=8UL, alignment=program.data_layout.i64_alignment, field_offsets=[]);
+    }
     return WirTypeLayout(valid=true, size=16UL, alignment=program.data_layout.i128_alignment, field_offsets=[]);
 }
 
 func wir_layout_type(program: WirModule, type_id: WirTypeID, states: Vector(Int), cache: Vector(WirTypeLayout)) -> WirTypeLayout {
     let index: Int = wir_id_index(UInt32(type_id));
-    if (index < 0 || index >= program.arena.types.length() || !program.data_layout.valid) { return wir_invalid_type_layout(); }
-    if (states[index] == 2) { return cache[index]; }
-    if (states[index] == 1) { return wir_invalid_type_layout(); }
+    if (index < 0 || index >= program.arena.types.length() || !program.data_layout.valid) {
+        return wir_invalid_type_layout();
+    }
+    if (states[index] == 2) {
+        return cache[index];
+    }
+    if (states[index] == 1) {
+        return wir_invalid_type_layout();
+    }
     states[index] = 1;
 
     let type: WirType = program.arena.types[index];
@@ -85,15 +110,21 @@ func wir_layout_type(program: WirModule, type_id: WirTypeID, states: Vector(Int)
         let i: Int = 0;
         while (i < type.fields.length()) {
             let field: WirTypeLayout = wir_layout_type(program, type.fields[i], states, cache);
-            if (!field.valid) { valid = false; break; }
+            if (!field.valid) {
+                valid = false;
+                break;
+            }
             size = wir_align_size(size, field.alignment);
-            if (size > wir_max_object_size(program.data_layout)) { valid = false; break; }
+            if (size > wir_max_object_size(program.data_layout)) {
+                valid = false;
+                break;
+            }
             offsets.append(UInt64(size));
             size += UInt128(field.size);
             if (field.alignment > alignment) { alignment = field.alignment; }
             i++;
         }
-        if (valid) {
+        if valid {
             size = wir_align_size(size, alignment);
             if (size <= wir_max_object_size(program.data_layout)) {
                 result = WirTypeLayout(valid=true, size=UInt64(size), alignment=alignment, field_offsets=offsets);
@@ -104,6 +135,24 @@ func wir_layout_type(program: WirModule, type_id: WirTypeID, states: Vector(Int)
     cache[index] = result;
     states[index] = 2;
     return result;
+}
+
+func wir_type_layouts(program: WirModule) -> Vector(WirTypeLayout) {
+// one cache per immutable type table, callers keep it for the whole pass
+    let states: Vector(Int) = [];
+    let layouts: Vector(WirTypeLayout) = [];
+    let i = 0;
+    while (i < program.arena.types.length()) {
+        states.append(0);
+        layouts.append(wir_invalid_type_layout());
+        i++;
+    }
+    i = 0;
+    while (i < layouts.length()) {
+        wir_layout_type(program, WirTypeID(UInt32(i + 1)), states, layouts);
+        i++;
+    }
+    return layouts;
 }
 
 func wir_type_layout(program: WirModule, type_id: WirTypeID) -> WirTypeLayout {

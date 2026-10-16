@@ -11,9 +11,11 @@ import string from "value.wl"
 import array from "value.wl"
 import object from "value.wl"
 
+
 const __MAX_DEPTH: Int = 1024;
 
 class Decoder {
+// keeps byte offset and human-readable position together while decoding one document
     let __source: String = null;
     let __index: Int = 0;
     let __line: Int = 1;
@@ -29,6 +31,7 @@ class Decoder {
     }
 
     func set_max_depth(max_depth: Int) -> Void {
+    // cap recursive arrays and objects before they can exhaust the native stack
         self.__max_depth = max_depth;
     }
 
@@ -52,9 +55,7 @@ class Decoder {
     }
 
     func __peek() -> Int {
-        if (self.__source is null || self.__index >= self.__source.length()) {
-            return -1;
-        }
+        if (self.__source is null || self.__index >= self.__source.length()) { return -1; }
         return Int(self.__source[self.__index]);
     }
 
@@ -96,9 +97,15 @@ class Decoder {
     }
 
     func __hex_digit(value: Int) -> Int {
-        if (value >= 48 && value <= 57) { return value - 48; }
-        if (value >= 65 && value <= 70) { return value - 55; }
-        if (value >= 97 && value <= 102) { return value - 87; }
+        if (value >= 48 && value <= 57) {
+            return value - 48;
+        }
+        if (value >= 65 && value <= 70) {
+            return value - 55;
+        }
+        if (value >= 97 && value <= 102) {
+            return value - 87;
+        }
         return -1;
     }
 
@@ -109,8 +116,12 @@ class Decoder {
         while (i < 4) {
             let raw: Int = self.__take();
             let digit: Int = self.__hex_digit(raw);
-            if (raw < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
-            if (digit < 0) { self.__fail(JsonError.InvalidUnicodeEscape)?; }
+            if (raw < 0) {
+                self.__fail(JsonError.UnexpectedEnd)?;
+            }
+            if (digit < 0) {
+                self.__fail(JsonError.InvalidUnicodeEscape)?;
+            }
             scalar = (scalar << 4) | digit;
             i += 1;
         }
@@ -124,8 +135,12 @@ class Decoder {
             while (i < 4) {
                 let raw: Int = self.__take();
                 let digit: Int = self.__hex_digit(raw);
-                if (raw < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
-                if (digit < 0) { self.__fail(JsonError.InvalidUnicodeEscape)?; }
+                if (raw < 0) {
+                    self.__fail(JsonError.UnexpectedEnd)?;
+                }
+                if (digit < 0) {
+                    self.__fail(JsonError.InvalidUnicodeEscape)?;
+                }
                 low = (low << 4) | digit;
                 i += 1;
             }
@@ -145,9 +160,15 @@ class Decoder {
 
         while true {
             let value: Int = self.__take();
-            if (value < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
-            if (value == 34) { return output.build()?; }
-            if (value < 32) { self.__fail(JsonError.InvalidControlCharacter)?; }
+            if (value < 0) {
+                self.__fail(JsonError.UnexpectedEnd)?;
+            }
+            if (value == 34) {
+                return output.build()?;
+            }
+            if (value < 32) {
+                self.__fail(JsonError.InvalidControlCharacter)?;
+            }
 
             if (value != 92) {
                 output.write_byte(Byte(value))?;
@@ -155,7 +176,9 @@ class Decoder {
             }
 
             let escaped: Int = self.__take();
-            if (escaped < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
+            if (escaped < 0) {
+                self.__fail(JsonError.UnexpectedEnd)?;
+            }
             if (escaped == 34 || escaped == 92 || escaped == 47) {
                 output.write_byte(Byte(escaped))?;
             } else if (escaped == 98) {
@@ -180,7 +203,9 @@ class Decoder {
     func __number() -> Value? {
         let start: Int = self.__index;
         if (self.__peek() == 45) { self.__take(); }
-        if (self.__peek() < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
+        if (self.__peek() < 0) {
+            self.__fail(JsonError.UnexpectedEnd)?;
+        }
 
         if (self.__peek() == 48) {
             self.__take();
@@ -221,7 +246,9 @@ class Decoder {
         }
 
         let source: String = self.__source[start:self.__index];
-        if (source is null) { throw Error.OutOfMemory; }
+        if (source is null) {
+            throw Error.OutOfMemory;
+        }
         return number_from_text(source)?;
     }
 
@@ -240,7 +267,9 @@ class Decoder {
             self.__skip_space();
             let delimiter: Int = self.__take();
             if (delimiter == 93) { return result; }
-            if (delimiter != 44) { self.__fail(JsonError.UnexpectedToken)?; }
+            if (delimiter != 44) {
+                self.__fail(JsonError.UnexpectedToken)?;
+            }
             self.__skip_space();
         }
         return null_value();
@@ -270,7 +299,9 @@ class Decoder {
             self.__skip_space();
             let delimiter: Int = self.__take();
             if (delimiter == 125) { return result; }
-            if (delimiter != 44) { self.__fail(JsonError.UnexpectedToken)?; }
+            if (delimiter != 44) {
+                self.__fail(JsonError.UnexpectedToken)?;
+            }
             self.__skip_space();
         }
         return null_value();
@@ -279,8 +310,12 @@ class Decoder {
     func __value(depth: Int) -> Value? {
         self.__skip_space();
         let value: Int = self.__peek();
-        if (value < 0) { self.__fail(JsonError.UnexpectedEnd)?; }
-        if (value == 34) { return string(self.__string()?)?; }
+        if (value < 0) {
+            self.__fail(JsonError.UnexpectedEnd)?;
+        }
+        if (value == 34) {
+            return string(self.__string()?)?;
+        }
         if (value == 91) {
             if (depth >= self.__max_depth) {
                 self.__fail(JsonError.NestingTooDeep)?;
@@ -313,6 +348,7 @@ class Decoder {
     }
 
     func decode() -> Value? {
+    // decode exactly one value and reject non-whitespace trailing input
     // validate the complete input before copying string bytes into values
         self.__index = 0;
         self.__line = 1;
@@ -321,21 +357,28 @@ class Decoder {
         self.__error_line = 0;
         self.__error_column = 0;
 
-        if (self.__source is null) { self.__fail(JsonError.InvalidValue)?; }
+        if (self.__source is null) {
+            self.__fail(JsonError.InvalidValue)?;
+        }
         if (self.__max_depth < 1 || self.__max_depth > __MAX_DEPTH) {
             self.__fail(JsonError.InvalidOption)?;
         }
-        if (!self.__source.is_valid_utf8()) { self.__fail(JsonError.InvalidUtf8)?; }
+        if (!self.__source.is_valid_utf8()) {
+            self.__fail(JsonError.InvalidUtf8)?;
+        }
 
         self.__skip_space();
         let result: Value = self.__value(0)?;
         self.__skip_space();
-        if (self.__peek() >= 0) { self.__fail(JsonError.TrailingData)?; }
+        if (self.__peek() >= 0) {
+            self.__fail(JsonError.TrailingData)?;
+        }
         return result;
     }
 }
 
 func decode(source: String) -> Value? {
+// convenience entry point with the decoder's default limits
     let decoder: Decoder = Decoder(source);
     return decoder.decode()?;
 }

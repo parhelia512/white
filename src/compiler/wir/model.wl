@@ -1,4 +1,4 @@
-// compiler/wir/model.wl
+// src/compiler/wir/model.wl
 
 type WirTypeID = UInt32;
 type WirValueID = UInt32;
@@ -96,6 +96,7 @@ enum WirOpcode {
     FloatLessEqual,
     FloatGreater,
     FloatGreaterEqual,
+    Abs,
     Negate,
     FloatNegate,
     Not,
@@ -268,10 +269,14 @@ struct WirTypeLayout(
 
 struct WirArena(
     types: Vector(WirType),
+    type_revision: Int,
+    pointer_types: Vector(WirTypeID),
+    scalar_types: Vector(WirTypeID),
     values: Vector(WirValue),
     instructions: Vector(WirInstruction),
     blocks: Vector(WirBlock),
     functions: Vector(WirFunction),
+    function_names: Dict(String, WirFuncID),
     globals: Vector(WirGlobal),
     constants: Vector(WirConstant)
 )

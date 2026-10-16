@@ -1,4 +1,4 @@
-// compiler/lowering/casts.wl
+// src/compiler/lowering/casts.wl
 import * from "../../frontend/ast.wl"
 import * from "../../frontend/arena.wl"
 import * from "../context.wl"
@@ -13,6 +13,7 @@ import * from "literals.wl"
 import * from "errors.wl"
 import * from "ownership.wl"
 
+
 func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: Int, pos: Position) -> CompileResult {
     if (!has_result(val_res) || val_res.reg == "") {
         let dummy_reg: String = "0";
@@ -25,8 +26,12 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
     }
 
     if (val_res.type == expected_type) { return val_res; }
-    if (has_result(val_res) && val_res.type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
-    if (expected_type == TYPE_POISON) { return CompileResult(reg="poison", type=TYPE_POISON); }
+    if (has_result(val_res) && val_res.type == TYPE_POISON) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
+    if (expected_type == TYPE_POISON) {
+        return CompileResult(reg="poison", type=TYPE_POISON);
+    }
     let expected_named: NamedTypeInfo = get_named_type(ref c, expected_type);
     if (has_named_type(expected_named) && has_func(c.curr_func) &&
         c.curr_func.base_name == conversion_method_name(expected_type) &&
@@ -61,12 +66,15 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
         let type_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + type_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + box_ptr + ", i32 0, i32 0\n");
+
         let boxed_tag: UInt64 = type_fingerprint(ref c, val_res.type);
         if (val_res.type == TYPE_NULL || val_res.type == TYPE_NULLPTR) { boxed_tag = UInt64(0); }
+
         c.output_file.write(c.indent + "store i64 " + boxed_tag + ", i64* " + type_ptr + "\n");
 
         let payload_low_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + payload_low_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + box_ptr + ", i32 0, i32 1\n");
+
         let payload_high_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + payload_high_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + box_ptr + ", i32 0, i32 2\n");
 
@@ -79,12 +87,16 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             let interface_ty: String = get_llvm_type_str(ref c, val_res.type);
             let object_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + object_ptr + " = extractvalue " + interface_ty + " " + val_res.reg + ", 0\n");
+
             let table_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + table_ptr + " = extractvalue " + interface_ty + " " + val_res.reg + ", 1\n");
+
             payload_low = next_reg(ref c);
             c.output_file.write(c.indent + payload_low + " = ptrtoint i8* " + object_ptr + " to i64\n");
+
             payload_high = next_reg(ref c);
             c.output_file.write(c.indent + payload_high + " = ptrtoint i8* " + table_ptr + " to i64\n");
+
             if (!val_res.owns_ref) {
                 emit_retain(ref c, val_res.reg, val_res.type);
             }
@@ -93,23 +105,30 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             let size_ty: String = get_size_llvm_type();
             let size_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + size_ptr + " = getelementptr " + value_ty + ", " + value_ty + "* null, " + size_ty + " 1\n");
+
             let value_size: String = next_reg(ref c);
             c.output_file.write(c.indent + value_size + " = ptrtoint " + value_ty + "* " + size_ptr + " to " + size_ty + "\n");
+
             let value_ptr: String = emit_alloc_obj(ref c, value_size, "" + val_res.type, value_ty + "*");
             if (needs_drop(ref c, val_res.type) && !val_res.owns_ref) {
                 emit_retain_value(ref c, val_res.reg, val_res.type);
             }
+
             c.output_file.write(c.indent + "store " + value_ty + " " + val_res.reg + ", " + value_ty + "* " + value_ptr + "\n");
+
             let erased: String = next_reg(ref c);
             c.output_file.write(c.indent + erased + " = bitcast " + value_ty + "* " + value_ptr + " to i8*\n");
             c.output_file.write(c.indent + "call void @__wl_retain(i8* " + erased + ")\n");
+
             payload_low = next_reg(ref c);
             c.output_file.write(c.indent + payload_low + " = ptrtoint " + value_ty + "* " + value_ptr + " to i64\n");
         } else if (boxed_type == TYPE_INT128 || boxed_type == TYPE_UINT128) {
             payload_low = next_reg(ref c);
             c.output_file.write(c.indent + payload_low + " = trunc i128 " + val_res.reg + " to i64\n");
+
             let shifted_high: String = next_reg(ref c);
             c.output_file.write(c.indent + shifted_high + " = lshr i128 " + val_res.reg + ", 64\n");
+
             payload_high = next_reg(ref c);
             c.output_file.write(c.indent + payload_high + " = trunc i128 " + shifted_high + " to i64\n");
         } else if (is_small_primitive_type(boxed_type)) {
@@ -123,6 +142,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         } else if (boxed_type == TYPE_FLOAT32) {
             let fpext_reg: String = next_reg(ref c);
             c.output_file.write(c.indent + fpext_reg + " = fpext float " + val_res.reg + " to double\n");
+
             payload_low = next_reg(ref c);
             c.output_file.write(c.indent + payload_low + " = bitcast double " + fpext_reg + " to i64\n");
         } else if (boxed_type == TYPE_INTSIZE || boxed_type == TYPE_UINTSIZE) {
@@ -145,7 +165,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 c.output_file.write(c.indent + payload_low + " = zext i32 " + val_res.reg + " to i64\n");
             } else {
                 let ptr_ty: String = get_llvm_type_str(ref c, val_res.type);
+
                 c.output_file.write(c.indent + payload_low + " = ptrtoint " + ptr_ty + " " + val_res.reg + " to i64\n");
+
                 if (is_ref_type(ref c, val_res.type) && !val_res.owns_ref) {
                     emit_retain(ref c, val_res.reg, val_res.type);
                 }
@@ -154,6 +176,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
         c.output_file.write(c.indent + "store i64 " + payload_low + ", i64* " + payload_low_ptr + "\n");
         c.output_file.write(c.indent + "store i64 " + payload_high + ", i64* " + payload_high_ptr + "\n");
+
         return CompileResult(reg=box_ptr, type=expected_type, origin_type=val_res.type);
     }
 
@@ -161,7 +184,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
     if (has_struct(variant_info_check) && val_res.type == variant_info_check.type_id) {
         let expected_repr: Int = get_repr_type(ref c, expected_type);
         let variant_llvm: String = variant_info_check.llvm_name;
-        
+
         let read_box_label: String = "read_box_" + c.type_counter;
         let check_match_label: String = "check_match_" + c.type_counter;
         let unbox_label: String = "unbox_" + c.type_counter;
@@ -174,7 +197,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
         let is_null_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + is_null_ptr + " = icmp eq " + variant_llvm + "* " + val_res.reg + ", null\n");
-        
+
         if can_be_null {
             c.output_file.write(c.indent + "br i1 " + is_null_ptr + ", label %" + null_return_label + ", label %" + read_box_label + "\n");
         } else {
@@ -182,14 +205,16 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         }
 
         c.output_file.write("\n" + read_box_label + ":\n");
+
         let type_id_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + type_id_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + val_res.reg + ", i32 0, i32 0\n");
+
         let type_id_reg: String = next_reg(ref c);
         c.output_file.write(c.indent + type_id_reg + " = load i64, i64* " + type_id_ptr + "\n");
 
         let is_zero_tag: String = next_reg(ref c);
         c.output_file.write(c.indent + is_zero_tag + " = icmp eq i64 " + type_id_reg + ", 0\n");
-        
+
         if can_be_null {
             c.output_file.write(c.indent + "br i1 " + is_zero_tag + ", label %" + null_return_label + ", label %" + check_match_label + "\n");
         } else {
@@ -197,8 +222,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         }
 
         c.output_file.write("\n" + check_match_label + ":\n");
+
         let is_match: String = next_reg(ref c);
-        
+
         if (expected_type == TYPE_GENERIC_STRUCT || expected_type == TYPE_GENERIC_CLASS) {
             let match_acc: String = "false";
             let candidate: Int = 1;
@@ -207,17 +233,21 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 let accepts: Bool = false;
                 if (candidate == TYPE_STRING) { accepts = true; }
                 if (has_struct(candidate_info) && !candidate_info.is_enum && !candidate_info.is_interface) {
-                    if (expected_type == TYPE_GENERIC_STRUCT && !candidate_info.is_class) { accepts = true; }
+                    if (expected_type == TYPE_GENERIC_STRUCT && !candidate_info.is_class) {
+                        accepts = true;
+                    }
                     if (expected_type == TYPE_GENERIC_CLASS && candidate_info.is_class) { accepts = true; }
                 }
                 if accepts {
                     let candidate_match: String = next_reg(ref c);
                     c.output_file.write(c.indent + candidate_match + " = icmp eq i64 " + type_id_reg + ", " + type_fingerprint(ref c, candidate) + "\n");
+
                     if (match_acc == "false") {
                         match_acc = candidate_match;
                     } else {
                         let combined: String = next_reg(ref c);
                         c.output_file.write(c.indent + combined + " = or i1 " + match_acc + ", " + candidate_match + "\n");
+
                         match_acc = combined;
                     }
                 }
@@ -231,22 +261,27 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         } else {
             c.output_file.write(c.indent + is_match + " = icmp eq i64 " + type_id_reg + ", " + type_fingerprint(ref c, expected_type) + "\n");
         }
-        
+
         c.output_file.write(c.indent + "br i1 " + is_match + ", label %" + unbox_label + ", label %" + fail_label + "\n");
 
         c.output_file.write("\n" + fail_label + ":\n");
+
         emit_runtime_error(ref c, pos, "Dict value type mismatch or missing. Expected " + get_type_name(ref c, expected_type) + ".");
 
         c.output_file.write("\n" + unbox_label + ":\n");
+
         let payload_low_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + payload_low_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + val_res.reg + ", i32 0, i32 1\n");
+
         let payload_low: String = next_reg(ref c);
         c.output_file.write(c.indent + payload_low + " = load i64, i64* " + payload_low_ptr + "\n");
+
         let payload_high_ptr: String = next_reg(ref c);
         c.output_file.write(c.indent + payload_high_ptr + " = getelementptr inbounds " + variant_llvm + ", " + variant_llvm + "* " + val_res.reg + ", i32 0, i32 2\n");
+
         let payload_high: String = next_reg(ref c);
         c.output_file.write(c.indent + payload_high + " = load i64, i64* " + payload_high_ptr + "\n");
-        
+
         let unboxed_reg: String = "";
         if (expected_repr == TYPE_INT128 || expected_repr == TYPE_UINT128) {
             unboxed_reg = combine_i128_words(ref c, payload_low, payload_high);
@@ -257,6 +292,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         } else if (expected_repr == TYPE_FLOAT32) {
             let cast_double: String = next_reg(ref c);
             c.output_file.write(c.indent + cast_double + " = bitcast i64 " + payload_low + " to double\n");
+
             unboxed_reg = next_reg(ref c);
             c.output_file.write(c.indent + unboxed_reg + " = fptrunc double " + cast_double + " to float\n");
         } else if (expected_repr == TYPE_INTSIZE || expected_repr == TYPE_UINTSIZE) {
@@ -274,17 +310,21 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             if (has_struct(exp_s_info) && exp_s_info.is_interface) {
                 let object_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + object_ptr + " = inttoptr i64 " + payload_low + " to i8*\n");
+
                 let table_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + table_ptr + " = inttoptr i64 " + payload_high + " to i8*\n");
+
                 let interface_ty: String = get_llvm_type_str(ref c, expected_type);
                 let with_object: String = next_reg(ref c);
                 c.output_file.write(c.indent + with_object + " = insertvalue " + interface_ty + " undef, i8* " + object_ptr + ", 0\n");
+
                 unboxed_reg = next_reg(ref c);
                 c.output_file.write(c.indent + unboxed_reg + " = insertvalue " + interface_ty + " " + with_object + ", i8* " + table_ptr + ", 1\n");
             } else if (is_value_struct(ref c, expected_type)) {
                 let value_ty: String = get_llvm_type_str(ref c, expected_type);
                 let value_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + value_ptr + " = inttoptr i64 " + payload_low + " to " + value_ty + "*\n");
+
                 unboxed_reg = next_reg(ref c);
                 c.output_file.write(c.indent + unboxed_reg + " = load " + value_ty + ", " + value_ty + "* " + value_ptr + "\n");
             } else if (has_struct(exp_s_info) && exp_s_info.is_enum) {
@@ -296,6 +336,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 c.output_file.write(c.indent + unboxed_reg + " = inttoptr i64 " + payload_low + " to " + ptr_ty + "\n");
             }
         }
+
         c.output_file.write(c.indent + "br label %" + merge_label + "\n");
 
         if can_be_null {
@@ -304,9 +345,10 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         }
 
         c.output_file.write("\n" + merge_label + ":\n");
+
         let final_val_reg: String = next_reg(ref c);
         let exp_ty_str: String = get_llvm_type_str(ref c, expected_type);
-        
+
         if can_be_null {
             let zero_val: String = "0";
             if (expected_repr == TYPE_FLOAT) {
@@ -318,7 +360,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             if (has_struct(expected_info) && expected_info.is_interface) {
                 zero_val = "zeroinitializer";
             }
-            
+
             c.output_file.write(c.indent + final_val_reg + " = phi " + exp_ty_str + " [ " + unboxed_reg + ", %" + unbox_label + " ], [ " + zero_val + ", %" + null_return_label + " ]\n");
         } else {
             c.output_file.write(c.indent + final_val_reg + " = phi " + exp_ty_str + " [ " + unboxed_reg + ", %" + unbox_label + " ]\n");
@@ -369,11 +411,18 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
     if (expected_type == TYPE_CHAR && val_res.type == TYPE_BYTE) {
         let char_reg: String = next_reg(ref c);
         c.output_file.write(c.indent + char_reg + " = zext i8 " + val_res.reg + " to i32\n");
+
         return CompileResult(reg=char_reg, type=TYPE_CHAR, origin_type=TYPE_BYTE);
     }
-    if (expected_type == TYPE_FLOAT && val_res.type == TYPE_INT) { return promote_to_float(ref c, val_res); }
-    if (expected_type == TYPE_FLOAT && val_res.type == TYPE_LONG) { return promote_to_float(ref c, val_res); }
-    if (expected_type == TYPE_FLOAT && val_res.type == TYPE_FLOAT32) { return promote_to_float(ref c, val_res); }
+    if (expected_type == TYPE_FLOAT && val_res.type == TYPE_INT) {
+        return promote_to_float(ref c, val_res);
+    }
+    if (expected_type == TYPE_FLOAT && val_res.type == TYPE_LONG) {
+        return promote_to_float(ref c, val_res);
+    }
+    if (expected_type == TYPE_FLOAT && val_res.type == TYPE_FLOAT32) {
+        return promote_to_float(ref c, val_res);
+    }
 
     if (expected_type == TYPE_GENERIC_ENUM) {
         if (val_res.type >= 100) {
@@ -404,12 +453,15 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 return CompileResult(reg="poison", type=TYPE_POISON);
             }
             let itable_name: String = "@itable." + val_info.name + "." + ex_info.name;
-            let itable_len: Int = 0; if (ex_info.vtable is !null) { itable_len = ex_info.vtable.length(); }
+            let itable_len: Int = 0;
+            if (ex_info.vtable is !null) { itable_len = ex_info.vtable.length(); }
             let obj_cast: String = next_reg(ref c);
             c.output_file.write(c.indent + obj_cast + " = bitcast " + val_info.llvm_name + "* " + val_res.reg + " to i8*\n");
+
             let s1: String = next_reg(ref c);
             let s2: String = next_reg(ref c);
             c.output_file.write(c.indent + s1 + " = insertvalue { i8*, i8* } undef, i8* " + obj_cast + ", 0\n");
+
             if (itable_len > 0) {
                 let itable_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + itable_ptr + " = bitcast [ " + itable_len + " x i8* ]* " + itable_name + " to i8*\n");
@@ -428,20 +480,27 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
                 let size_ty: String = get_size_llvm_type();
                 let size_ptr: String = next_reg(ref c);
                 c.output_file.write(c.indent + size_ptr + " = getelementptr " + value_ty + ", " + value_ty + "* null, " + size_ty + " 1\n");
+
                 let value_size: String = next_reg(ref c);
                 c.output_file.write(c.indent + value_size + " = ptrtoint " + value_ty + "* " + size_ptr + " to " + size_ty + "\n");
+
                 let value_ptr: String = emit_alloc_obj(ref c, value_size, "" + val_res.type, value_ty + "*");
                 if (needs_drop(ref c, val_res.type) && !val_res.owns_ref) {
                     emit_retain_value(ref c, val_res.reg, val_res.type);
                 }
+
                 c.output_file.write(c.indent + "store " + value_ty + " " + val_res.reg + ", " + value_ty + "* " + value_ptr + "\n");
+
                 let erased: String = next_reg(ref c);
                 c.output_file.write(c.indent + erased + " = bitcast " + value_ty + "* " + value_ptr + " to i8*\n");
+
                 return CompileResult(reg=erased, type=expected_type, origin_type=val_res.type, is_const_access=val_res.is_const_access);
             }
             let cast_reg: String = next_reg(ref c);
             let src_ty: String = get_llvm_type_str(ref c, val_res.type);
+
             c.output_file.write(c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to i8*\n");
+
             return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref, is_const_access=val_res.is_const_access);
         }
     }
@@ -478,7 +537,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
 
                 return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=owns_value, is_const_access=val_res.is_const_access);
             }
+
             c.output_file.write(c.indent + cast_reg + " = bitcast i8* " + val_res.reg + " to " + dest_ty + "\n");
+
             return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref, is_const_access=val_res.is_const_access);
         }
     }
@@ -490,6 +551,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             let src_ty: String = get_llvm_type_str(ref c, val_res.type);
             if (dest_ty != src_ty) {
                 c.output_file.write(c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to " + dest_ty + "\n");
+
                 return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin);
             }
             return CompileResult(reg=val_res.reg, type=expected_type, origin_type=origin);
@@ -500,7 +562,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if (val_res.type == TYPE_STRING) {
             let cast_reg: String = next_reg(ref c);
             let dest_ty: String = get_llvm_type_str(ref c, expected_type);
+
             c.output_file.write(c.indent + cast_reg + " = bitcast %struct.$String* " + val_res.reg + " to " + dest_ty + "\n");
+
             return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.type, owns_ref=val_res.owns_ref);
         }
     }
@@ -509,7 +573,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if (expected_type == TYPE_STRING) {
             let cast_reg: String = next_reg(ref c);
             let src_ty: String = get_llvm_type_str(ref c, val_res.type);
+
             c.output_file.write(c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to %struct.$String*\n");
+
             return CompileResult(reg=cast_reg, type=expected_type, origin_type=origin, owns_ref=val_res.owns_ref);
         }
     }
@@ -556,7 +622,9 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             let cast_reg: String = next_reg(ref c);
             let dest_ty: String = get_llvm_type_str(ref c, expected_type);
             let src_ty: String = get_llvm_type_str(ref c, val_res.type);
+
             c.output_file.write(c.indent + cast_reg + " = bitcast " + src_ty + " " + val_res.reg + " to " + dest_ty + "\n");
+
             return CompileResult(reg=cast_reg, type=expected_type, origin_type=val_res.origin_type, owns_ref=val_res.owns_ref);
         }
     }
@@ -570,6 +638,7 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
         if (has_array_info(val_arr) && val_arr.size > 0 && val_arr.base_type == elem_type) {
             let data_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + data_ptr + " = getelementptr inbounds " + val_arr.llvm_name + ", " + val_arr.llvm_name + "* " + val_res.reg + ", i32 0, i32 0\n");
+
             return emit_slice_copy(ref c, elem_type, data_ptr, "0", "" + val_arr.size, pos);
         }
 
@@ -579,11 +648,13 @@ func emit_implicit_cast(ref c: Compiler, val_res: CompileResult, expected_type: 
             let size_ty: String = get_size_llvm_type();
             let size_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + size_ptr + " = getelementptr inbounds " + vec_struct_ty + ", " + vec_struct_ty + "* " + val_res.reg + ", i32 0, i32 0\n");
+
             let size_val: String = next_reg(ref c);
             c.output_file.write(c.indent + size_val + " = load " + size_ty + ", " + size_ty + "* " + size_ptr + "\n");
-            
+
             let data_ptr_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + data_ptr_ptr + " = getelementptr inbounds " + vec_struct_ty + ", " + vec_struct_ty + "* " + val_res.reg + ", i32 0, i32 2\n");
+
             let data_ptr: String = next_reg(ref c);
             c.output_file.write(c.indent + data_ptr + " = load " + elem_ty_str + "*, " + elem_ty_str + "** " + data_ptr_ptr + "\n");
 
@@ -608,15 +679,12 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
     if (res.type == TYPE_INT8 || res.type == TYPE_INT16 || res.type == TYPE_UINT16) {
         res = promote_to_int(ref c, res);
     }
-    if (res.type == TYPE_UINT32) {
-        res = promote_to_long(ref c, res);
-    }
-    if (res.type == TYPE_FLOAT32) {
-        res = promote_to_float(ref c, res);
-    }
+    if (res.type == TYPE_UINT32) { res = promote_to_long(ref c, res); }
+    if (res.type == TYPE_FLOAT32) { res = promote_to_float(ref c, res); }
     if (res.type == TYPE_INTSIZE && get_target_pointer_bits() < 64) {
         let widened: String = next_reg(ref c);
         c.output_file.write(c.indent + widened + " = sext " + get_size_llvm_type() + " " + res.reg + " to i64\n");
+
         res = CompileResult(reg=widened, type=TYPE_LONG);
     } else if (res.type == TYPE_INTSIZE) {
         res.type = TYPE_LONG;
@@ -624,17 +692,17 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
     if (res.type == TYPE_UINTSIZE && get_target_pointer_bits() < 64) {
         let widened: String = next_reg(ref c);
         c.output_file.write(c.indent + widened + " = zext " + get_size_llvm_type() + " " + res.reg + " to i64\n");
+
         res = CompileResult(reg=widened, type=TYPE_UINT64);
     }
 
     if (res.type == TYPE_INT128 || res.type == TYPE_UINT128) {
         let hook_name: String = "format_int128";
-        if (res.type == TYPE_UINT128) {
-            hook_name = "format_uint128";
-        }
+        if (res.type == TYPE_UINT128) { hook_name = "format_uint128"; }
         let format_hook: String = get_mangled_symbol(ref c, hook_name, no_position());
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i128 " + res.reg + ")\n");
+
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
@@ -642,6 +710,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let format_hook: String = get_mangled_symbol(ref c, "format_uint64", no_position());
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i64 " + res.reg + ")\n");
+
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
@@ -655,6 +724,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let format_hook: String = get_mangled_symbol(ref c, "format_int", no_position());
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i32 " + val_reg + ")\n");
+
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
@@ -662,6 +732,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let format_hook: String = get_mangled_symbol(ref c, "format_long", no_position());
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i64 " + res.reg + ")\n");
+
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
@@ -669,6 +740,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let format_hook: String = get_mangled_symbol(ref c, "format_float", no_position());
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(double " + res.reg + ")\n");
+
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
@@ -677,6 +749,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let false_id: Int = register_string_constant(ref c, "false");
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = select i1 " + res.reg + ", %struct.$String* " + get_string_object_ptr(true_id) + ", %struct.$String* " + get_string_object_ptr(false_id) + "\n");
+
         return CompileResult(reg=result, type=TYPE_STRING);
     }
 
@@ -684,6 +757,7 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
         let format_hook: String = get_mangled_symbol(ref c, "utf8_encode_char", no_position());
         let result: String = next_reg(ref c);
         c.output_file.write(c.indent + result + " = call %struct.$String* @" + format_hook + "(i32 " + res.reg + ")\n");
+
         return CompileResult(reg=result, type=TYPE_STRING, owns_ref=true);
     }
 
@@ -693,44 +767,94 @@ func convert_to_string(ref c: Compiler, res: CompileResult) -> CompileResult {
 }
 
 func integer_max_literal(type_id: Int) -> String {
-    if (type_id == TYPE_INT8) { return "127"; }
-    if (type_id == TYPE_INT16) { return "32767"; }
+    if (type_id == TYPE_INT8) {
+        return "127";
+    }
+    if (type_id == TYPE_INT16) {
+        return "32767";
+    }
     if (type_id == TYPE_INT) { return "2147483647"; }
-    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) { return "2147483647"; }
-    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return "9223372036854775807"; }
-    if (type_id == TYPE_INT128) { return "170141183460469231731687303715884105727"; }
-    if (type_id == TYPE_BYTE) { return "255"; }
-    if (type_id == TYPE_UINT16) { return "65535"; }
+    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) {
+        return "2147483647";
+    }
+    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) {
+        return "9223372036854775807";
+    }
+    if (type_id == TYPE_INT128) {
+        return "170141183460469231731687303715884105727";
+    }
+    if (type_id == TYPE_BYTE) {
+        return "255";
+    }
+    if (type_id == TYPE_UINT16) {
+        return "65535";
+    }
     if (type_id == TYPE_UINT32) { return "4294967295"; }
-    if (type_id == TYPE_UINTSIZE && get_target_pointer_bits() == 32) { return "4294967295"; }
-    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) { return "18446744073709551615"; }
-    if (type_id == TYPE_UINT128) { return "340282366920938463463374607431768211455"; }
+    if (type_id == TYPE_UINTSIZE && get_target_pointer_bits() == 32) {
+        return "4294967295";
+    }
+    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) {
+        return "18446744073709551615";
+    }
+    if (type_id == TYPE_UINT128) {
+        return "340282366920938463463374607431768211455";
+    }
     return "";
 }
 
 func signed_negative_limit(type_id: Int) -> UInt128 {
-    if (type_id == TYPE_INT8) { return UInt128(128); }
-    if (type_id == TYPE_INT16) { return UInt128(32768); }
-    if (type_id == TYPE_INT) { return UInt128(2147483648UL); }
-    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) { return UInt128(2147483648UL); }
+    if (type_id == TYPE_INT8) {
+        return UInt128(128);
+    }
+    if (type_id == TYPE_INT16) {
+        return UInt128(32768);
+    }
+    if (type_id == TYPE_INT) {
+        return UInt128(2147483648UL);
+    }
+    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) {
+        return UInt128(2147483648UL);
+    }
     if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return UInt128(9223372036854775808UL); }
-    if (type_id == TYPE_INT128) { return 170141183460469231731687303715884105728ULL; }
+    if (type_id == TYPE_INT128) {
+        return 170141183460469231731687303715884105728ULL;
+    }
     return UInt128(0);
 }
 
 func positive_integer_limit(type_id: Int) -> UInt128 {
     if (type_id == TYPE_INT8) { return UInt128(127); }
-    if (type_id == TYPE_INT16) { return UInt128(32767); }
-    if (type_id == TYPE_INT) { return UInt128(2147483647); }
-    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) { return UInt128(2147483647); }
-    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return UInt128(9223372036854775807L); }
-    if (type_id == TYPE_INT128) { return 170141183460469231731687303715884105727ULL; }
+    if (type_id == TYPE_INT16) {
+        return UInt128(32767);
+    }
+    if (type_id == TYPE_INT) {
+        return UInt128(2147483647);
+    }
+    if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) {
+        return UInt128(2147483647);
+    }
+    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) {
+        return UInt128(9223372036854775807L);
+    }
+    if (type_id == TYPE_INT128) {
+        return 170141183460469231731687303715884105727ULL;
+    }
     if (type_id == TYPE_BYTE) { return UInt128(255); }
-    if (type_id == TYPE_UINT16) { return UInt128(65535); }
-    if (type_id == TYPE_UINT32) { return UInt128(4294967295UL); }
-    if (type_id == TYPE_UINTSIZE && get_target_pointer_bits() == 32) { return UInt128(4294967295UL); }
-    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) { return UInt128(18446744073709551615UL); }
-    if (type_id == TYPE_UINT128) { return 340282366920938463463374607431768211455ULL; }
+    if (type_id == TYPE_UINT16) {
+        return UInt128(65535);
+    }
+    if (type_id == TYPE_UINT32) {
+        return UInt128(4294967295UL);
+    }
+    if (type_id == TYPE_UINTSIZE && get_target_pointer_bits() == 32) {
+        return UInt128(4294967295UL);
+    }
+    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) {
+        return UInt128(18446744073709551615UL);
+    }
+    if (type_id == TYPE_UINT128) {
+        return 340282366920938463463374607431768211455ULL;
+    }
     return UInt128(0);
 }
 
@@ -754,7 +878,7 @@ func is_numeric_literal_expression(ref c: Compiler, node: NodeID) -> Bool {
         return true;
     }
     if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         if (unary.op_tok.type == TOK_PLUS || unary.op_tok.type == TOK_SUB) {
             return is_numeric_literal_expression(ref c, unary.node);
         }
@@ -773,31 +897,31 @@ func validate_explicit_literal_cast(ref c: Compiler, node: NodeID, target_type: 
     let float_value: Float = 0.0;
 
     if (base == NODE_INT) {
-        let integer: IntNode = get_int_node(c.arena, node);
+        let integer: IntNode = get_int_node(ref c.arena, node);
         literal_text = integer.tok.value;
         magnitude = parse_const_uint128(integer.tok.value, integer.pos);
     } else if (base == NODE_FLOAT) {
-        let float_node: FloatNode = get_float_node(c.arena, node);
+        let float_node: FloatNode = get_float_node(ref c.arena, node);
         literal_text = float_node.tok.value;
         float_value = parse_decimal_float_literal(float_node.tok.value);
         is_float_literal = true;
     } else if (base == NODE_CHAR) {
-        let char_node: CharNode = get_char_node(c.arena, node);
+        let char_node: CharNode = get_char_node(ref c.arena, node);
         literal_text = "'" + char_node.tok.value + "'";
         magnitude = UInt128(string_to_int(char_node.tok.value, char_node.pos));
     } else if (base == NODE_BOOL) {
         return true;
     } else if (base == NODE_UNARYOP) {
-        let unary: UnaryOpNode = get_unary_node(c.arena, node);
+        let unary: UnaryOpNode = get_unary_node(ref c.arena, node);
         let inner_base: Int = node_tag(unary.node);
         if (unary.op_tok.type != TOK_SUB) { return true; }
         if (inner_base == NODE_INT) {
-            let integer: IntNode = get_int_node(c.arena, unary.node);
+            let integer: IntNode = get_int_node(ref c.arena, unary.node);
             literal_text = "-" + integer.tok.value;
             magnitude = parse_const_uint128(integer.tok.value, integer.pos);
             negative = magnitude != UInt128(0);
         } else if (inner_base == NODE_FLOAT) {
-            let float_node: FloatNode = get_float_node(c.arena, unary.node);
+            let float_node: FloatNode = get_float_node(ref c.arena, unary.node);
             literal_text = "-" + float_node.tok.value;
             float_value = 0.0 - parse_decimal_float_literal(float_node.tok.value);
             is_float_literal = true;
@@ -871,29 +995,59 @@ func validate_explicit_literal_cast(ref c: Compiler, node: NodeID, target_type: 
 }
 
 func integer_upper_bound(type_id: Int) -> String {
-    if (type_id == TYPE_INT8) { return "128.0"; }
-    if (type_id == TYPE_INT16) { return "32768.0"; }
-    if (type_id == TYPE_INT) { return "2147483648.0"; }
+    if (type_id == TYPE_INT8) {
+        return "128.0";
+    }
+    if (type_id == TYPE_INT16) {
+        return "32768.0";
+    }
+    if (type_id == TYPE_INT) {
+        return "2147483648.0";
+    }
     if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) { return "2147483648.0"; }
-    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return "9223372036854775808.0"; }
-    if (type_id == TYPE_INT128) { return "170141183460469231731687303715884105728.0"; }
-    if (type_id == TYPE_BYTE) { return "256.0"; }
-    if (type_id == TYPE_UINT16) { return "65536.0"; }
-    if (type_id == TYPE_UINT32) { return "4294967296.0"; }
+    if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) {
+        return "9223372036854775808.0";
+    }
+    if (type_id == TYPE_INT128) {
+        return "170141183460469231731687303715884105728.0";
+    }
+    if (type_id == TYPE_BYTE) {
+        return "256.0";
+    }
+    if (type_id == TYPE_UINT16) {
+        return "65536.0";
+    }
+    if (type_id == TYPE_UINT32) {
+        return "4294967296.0";
+    }
     if (type_id == TYPE_UINTSIZE && get_target_pointer_bits() == 32) { return "4294967296.0"; }
-    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) { return "18446744073709551616.0"; }
-    if (type_id == TYPE_UINT128) { return "340282366920938463463374607431768211456.0"; }
+    if (type_id == TYPE_UINT64 || type_id == TYPE_UINTSIZE) {
+        return "18446744073709551616.0";
+    }
+    if (type_id == TYPE_UINT128) {
+        return "340282366920938463463374607431768211456.0";
+    }
     return "";
 }
 
 func integer_lower_bound(type_id: Int) -> String {
-    if (is_unsigned_integer(type_id)) { return "0.0"; }
-    if (type_id == TYPE_INT8) { return "-128.0"; }
-    if (type_id == TYPE_INT16) { return "-32768.0"; }
-    if (type_id == TYPE_INT) { return "-2147483648.0"; }
+    if (is_unsigned_integer(type_id)) {
+        return "0.0";
+    }
+    if (type_id == TYPE_INT8) {
+        return "-128.0";
+    }
+    if (type_id == TYPE_INT16) {
+        return "-32768.0";
+    }
+    if (type_id == TYPE_INT) {
+        return "-2147483648.0";
+    }
     if (type_id == TYPE_INTSIZE && get_target_pointer_bits() == 32) { return "-2147483648.0"; }
     if (type_id == TYPE_LONG || type_id == TYPE_INTSIZE) { return "-9223372036854775808.0"; }
-    if (type_id == TYPE_INT128) { return "-170141183460469231731687303715884105728.0"; }
+    if (type_id == TYPE_INT128) {
+        return "-170141183460469231731687303715884105728.0";
+    }
     return "0.0";
 }
 
@@ -901,6 +1055,7 @@ func append_cast_condition(ref c: Compiler, current: String, next: String) -> St
     if (current.length() == 0) { return next; }
     let combined: String = next_reg(ref c);
     c.output_file.write(c.indent + combined + " = and i1 " + current + ", " + next + "\n");
+
     return combined;
 }
 
@@ -918,6 +1073,7 @@ func emit_integer_cast_check(ref c: Compiler, value: String, source_type: Int, t
         c.output_file.write(c.indent + is_zero + " = icmp eq " + llvm_type + " " + value + ", 0\n");
         c.output_file.write(c.indent + is_one + " = icmp eq " + llvm_type + " " + value + ", 1\n");
         c.output_file.write(c.indent + result + " = or i1 " + is_zero + ", " + is_one + "\n");
+
         return result;
     }
 
@@ -925,16 +1081,16 @@ func emit_integer_cast_check(ref c: Compiler, value: String, source_type: Int, t
         if signed_source {
             let non_negative: String = next_reg(ref c);
             c.output_file.write(c.indent + non_negative + " = icmp sge " + llvm_type + " " + value + ", 0\n");
+
             valid = append_cast_condition(ref c, valid, non_negative);
         }
         if (source_bits >= 32) {
             let below_limit: String = next_reg(ref c);
             let predicate: String = "ule";
-            if signed_source {
-                predicate = "sle";
-            }
+            if signed_source { predicate = "sle"; }
 
             c.output_file.write(c.indent + below_limit + " = icmp " + predicate + " " + llvm_type + " " + value + ", 1114111\n");
+
             valid = append_cast_condition(ref c, valid, below_limit);
         }
         let can_reach_surrogates: Bool = source_bits >= 32 ||
@@ -949,12 +1105,16 @@ func emit_integer_cast_check(ref c: Compiler, value: String, source_type: Int, t
                 less_predicate = "slt";
                 greater_predicate = "sgt";
             }
+
             c.output_file.write(c.indent + below_surrogates + " = icmp " + less_predicate + " " + llvm_type + " " + value + ", 55296\n");
             c.output_file.write(c.indent + above_surrogates + " = icmp " + greater_predicate + " " + llvm_type + " " + value + ", 57343\n");
             c.output_file.write(c.indent + outside_surrogates + " = or i1 " + below_surrogates + ", " + above_surrogates + "\n");
+
             valid = append_cast_condition(ref c, valid, outside_surrogates);
         }
-        if (valid.length() == 0) { return "true"; }
+        if (valid.length() == 0) {
+            return "true";
+        }
         return valid;
     }
 
@@ -963,30 +1123,38 @@ func emit_integer_cast_check(ref c: Compiler, value: String, source_type: Int, t
     if (!source_unsigned && target_unsigned) {
         let non_negative: String = next_reg(ref c);
         c.output_file.write(c.indent + non_negative + " = icmp sge " + llvm_type + " " + value + ", 0\n");
+
         valid = append_cast_condition(ref c, valid, non_negative);
         if (target_bits < source_bits) {
             let below_max: String = next_reg(ref c);
             c.output_file.write(c.indent + below_max + " = icmp sle " + llvm_type + " " + value + ", " + integer_max_literal(target_type) + "\n");
+
             valid = append_cast_condition(ref c, valid, below_max);
         }
     } else if (source_unsigned && !target_unsigned) {
         let below_max: String = next_reg(ref c);
         c.output_file.write(c.indent + below_max + " = icmp ule " + llvm_type + " " + value + ", " + integer_max_literal(target_type) + "\n");
+
         valid = append_cast_condition(ref c, valid, below_max);
     } else if (source_bits > target_bits) {
         let below_max: String = next_reg(ref c);
         let predicate: String = "ule";
         if signed_source { predicate = "sle"; }
+
         c.output_file.write(c.indent + below_max + " = icmp " + predicate + " " + llvm_type + " " + value + ", " + integer_max_literal(target_type) + "\n");
+
         valid = append_cast_condition(ref c, valid, below_max);
         if signed_source {
             let above_min: String = next_reg(ref c);
             c.output_file.write(c.indent + above_min + " = icmp sge " + llvm_type + " " + value + ", " + get_signed_min_literal(target_type) + "\n");
+
             valid = append_cast_condition(ref c, valid, above_min);
         }
     }
 
-    if (valid.length() == 0) { return "true"; }
+    if (valid.length() == 0) {
+        return "true";
+    }
     return valid;
 }
 
@@ -999,6 +1167,7 @@ func emit_float_cast_check(ref c: Compiler, value: String, source_type: Int, tar
         c.output_file.write(c.indent + is_zero + " = fcmp oeq " + llvm_type + " " + value + ", 0.0\n");
         c.output_file.write(c.indent + is_one + " = fcmp oeq " + llvm_type + " " + value + ", 1.0\n");
         c.output_file.write(c.indent + valid + " = or i1 " + is_zero + ", " + is_one + "\n");
+
         return valid;
     }
 
@@ -1011,8 +1180,10 @@ func emit_float_cast_check(ref c: Compiler, value: String, source_type: Int, tar
         lower_bound = "0.0";
         upper_bound = "1114112.0";
     }
+
     c.output_file.write(c.indent + lower + " = fcmp oge " + llvm_type + " " + value + ", " + lower_bound + "\n");
     c.output_file.write(c.indent + upper + " = fcmp olt " + llvm_type + " " + value + ", " + upper_bound + "\n");
+
     valid = append_cast_condition(ref c, valid, lower);
     valid = append_cast_condition(ref c, valid, upper);
 
@@ -1023,6 +1194,7 @@ func emit_float_cast_check(ref c: Compiler, value: String, source_type: Int, tar
         c.output_file.write(c.indent + before_surrogates + " = fcmp olt " + llvm_type + " " + value + ", 55296.0\n");
         c.output_file.write(c.indent + after_surrogates + " = fcmp oge " + llvm_type + " " + value + ", 57344.0\n");
         c.output_file.write(c.indent + outside_surrogates + " = or i1 " + before_surrogates + ", " + after_surrogates + "\n");
+
         valid = append_cast_condition(ref c, valid, outside_surrogates);
     }
     return valid;
@@ -1055,6 +1227,7 @@ func emit_fallible_cast(ref c: Compiler, value: CompileResult, valid: String, ta
     c.output_file.write(c.indent + "br i1 " + valid + ", label %" + success_label + ", label %" + fail_label + "\n");
 
     c.output_file.write("\n" + fail_label + ":\n");
+
     let error_value: CompileResult = standard_overflow_error(ref c, pos);
     let fail_1: String = next_reg(ref c);
     let fail_2: String = next_reg(ref c);
@@ -1063,6 +1236,7 @@ func emit_fallible_cast(ref c: Compiler, value: CompileResult, valid: String, ta
     c.output_file.write(c.indent + "br label %" + end_label + "\n");
 
     c.output_file.write("\n" + success_label + ":\n");
+
     let converted: CompileResult = compile_type_cast(ref c, value, target_type, pos);
     let success_1: String = next_reg(ref c);
     let success_2: String = next_reg(ref c);
@@ -1073,8 +1247,10 @@ func emit_fallible_cast(ref c: Compiler, value: CompileResult, valid: String, ta
     c.output_file.write(c.indent + "br label %" + end_label + "\n");
 
     c.output_file.write("\n" + end_label + ":\n");
+
     let result: String = next_reg(ref c);
     c.output_file.write(c.indent + result + " = phi " + fallible_llvm + " [ " + fail_2 + ", %" + fail_label + " ], [ " + success_3 + ", %" + success_label + " ]\n");
+
     return CompileResult(reg=result, type=fallible_type, origin_type=0, owns_ref=false);
 }
 
@@ -1083,15 +1259,19 @@ func unwrap_conversion_or_panic(ref c: Compiler, value: CompileResult, source_ty
     let failed: String = next_reg(ref c);
     let fail_label: String = next_label(ref c);
     let success_label: String = next_label(ref c);
+
     c.output_file.write(c.indent + failed + " = extractvalue " + fallible_llvm + " " + value.reg + ", 0\n");
     c.output_file.write(c.indent + "br i1 " + failed + ", label %" + fail_label + ", label %" + success_label + "\n");
 
     c.output_file.write("\n" + fail_label + ":\n");
+
     emit_runtime_error(ref c, pos, "conversion from " + get_type_name(ref c, source_type) + " to " + get_type_name(ref c, target_type) + " failed");
 
     c.output_file.write("\n" + success_label + ":\n");
+
     let result: String = next_reg(ref c);
     c.output_file.write(c.indent + result + " = extractvalue " + fallible_llvm + " " + value.reg + ", 2\n");
+
     return CompileResult(reg=result, type=target_type, origin_type=0, owns_ref=value.owns_ref && needs_drop(ref c, target_type));
 }
 
@@ -1101,6 +1281,7 @@ func compile_explicit_type_cast(ref c: Compiler, value: CompileResult, target_ty
     if (value.type == TYPE_ANY_ERROR && is_integer_type(target_type)) {
         let code: String = next_reg(ref c);
         c.output_file.write(c.indent + code + " = extractvalue { i64, i32 } " + value.reg + ", 1\n");
+
         return compile_explicit_type_cast(ref c, CompileResult(reg=code, type=TYPE_INT), target_type, pos, preserve_failure);
     }
 
@@ -1127,10 +1308,14 @@ func compile_explicit_type_cast(ref c: Compiler, value: CompileResult, target_ty
 
     let fail_label: String = next_label(ref c);
     let success_label: String = next_label(ref c);
+
     c.output_file.write(c.indent + "br i1 " + valid + ", label %" + success_label + ", label %" + fail_label + "\n");
     c.output_file.write("\n" + fail_label + ":\n");
+
     emit_runtime_error(ref c, pos, "conversion from " + get_type_name(ref c, value.type) + " to " + get_type_name(ref c, target_type) + " is out of range");
+
     c.output_file.write("\n" + success_label + ":\n");
+
     return compile_type_cast(ref c, value, target_type, pos);
 }
 
@@ -1141,7 +1326,13 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     let source_repr: Int = get_repr_type(ref c, val_res.type);
     let target_repr: Int = get_repr_type(ref c, target_type);
     if (source_repr != val_res.type || target_repr != target_type) {
-        let raw: CompileResult = CompileResult(reg=val_res.reg, type=source_repr, origin_type=val_res.origin_type, owns_ref=val_res.owns_ref, is_const_access=val_res.is_const_access);
+        let raw: CompileResult = CompileResult(
+            reg=val_res.reg,
+            type=source_repr,
+            origin_type=val_res.origin_type,
+            owns_ref=val_res.owns_ref,
+            is_const_access=val_res.is_const_access
+        );
         let converted: CompileResult = compile_type_cast(ref c, raw, target_repr, pos);
         converted.type = target_type;
         return converted;
@@ -1158,6 +1349,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     if (val_res.type == TYPE_ANY_ERROR && is_integer_type(target_type)) {
         let code: String = next_reg(ref c);
         c.output_file.write(c.indent + code + " = extractvalue { i64, i32 } " + val_res.reg + ", 1\n");
+
         return compile_type_cast(ref c, CompileResult(reg=code, type=TYPE_INT), target_type, pos);
     }
 
@@ -1181,7 +1373,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
         }
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
-    
+
     let src_is_erased_struct: Bool = val_res.type == TYPE_GENERIC_STRUCT;
     let src_is_ptr: Bool = is_pointer_type(ref c, val_res.type) || val_res.type == TYPE_STRING ||
                            val_res.type == TYPE_ANYPTR || val_res.type == TYPE_NULLPTR || src_is_erased_struct;
@@ -1189,15 +1381,18 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
 
     if (src_is_ptr && dst_is_ptr) {
         c.output_file.write(c.indent + res_reg + " = bitcast " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
+
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
 
     if (src_is_ptr && dst_is_int) {
         c.output_file.write(c.indent + res_reg + " = ptrtoint " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
+
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
     if (src_is_int && dst_is_ptr) {
         c.output_file.write(c.indent + res_reg + " = inttoptr " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
+
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
 
@@ -1213,20 +1408,24 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     if (src_is_int && dst_is_float) {
         let op: String = "sitofp";
         if (is_unsigned_integer(val_res.type) || val_res.type == TYPE_BOOL) { op = "uitofp"; }
+
         c.output_file.write(c.indent + res_reg + " = " + op + " " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
+
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
     if (src_is_float && dst_is_int) {
         let op: String = "fptosi";
         if (is_unsigned_integer(target_type) || target_type == TYPE_BOOL) { op = "fptoui"; }
+
         c.output_file.write(c.indent + res_reg + " = " + op + " " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
+
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
     }
 
     if (src_is_int && dst_is_int) {
         let src_bits: Int = get_type_bitwidth(val_res.type);
         let dst_bits: Int = get_type_bitwidth(target_type);
-        
+
         if (src_bits == dst_bits) {
             return CompileResult(reg=val_res.reg, type=target_type, origin_type=0);
         }
@@ -1235,6 +1434,7 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
         } else {
             let op: String = "sext";
             if (is_unsigned_integer(val_res.type) || val_res.type == TYPE_BOOL) { op = "zext"; }
+
             c.output_file.write(c.indent + res_reg + " = " + op + " " + src_ty_str + " " + val_res.reg + " to " + dst_ty_str + "\n");
         }
         return CompileResult(reg=res_reg, type=target_type, origin_type=0);
@@ -1243,4 +1443,3 @@ func compile_type_cast(ref c: Compiler, val_res: CompileResult, target_type: Int
     throw_type_error(pos, "Unsupported explicit type cast.");
     return void_result();
 }
-

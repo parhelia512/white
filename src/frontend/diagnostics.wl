@@ -1,7 +1,8 @@
-// frontend/diagnostics.wl
+// src/frontend/diagnostics.wl
 import "file"
 import "process"
 import Dict from "dict"
+
 
 let GLOBAL_ERROR_COUNT: Int = 0;
 let LAST_ERROR_FILE: String = "";
@@ -59,7 +60,6 @@ struct __SourceUnit(
     width  : Int,
     valid  : Bool
 )
-
 
 func no_position() -> Position {
     return Position(idx=0, ln=0, col=0, text=null, fn=null);
@@ -170,7 +170,9 @@ func source_position(text: String, line: Int, byte_column: Int) -> SourcePositio
     while (offset < target) {
         let unit: __SourceUnit = __source_unit(text, offset);
         let width: Int = unit.width;
-        if (width <= 0 || offset + width > target) { break; }
+        if (width <= 0 || offset + width > target) {
+            break;
+        }
         offset += width;
         unicode_column += 1;
         if (unit.scalar > 65535) {
@@ -223,24 +225,46 @@ func __diagnostic_width(pos: Position) -> Int {
             (current >= Int('A') && current <= Int('Z')) ||
             (current >= Int('0') && current <= Int('9')) ||
             current == Int('_');
-        if (!valid) { break; }
+        if (!valid) {
+            break;
+        }
         end += 1;
     }
     return end - offset;
 }
 
 func diagnostic_code(category: String) -> String {
-    if (category == "IllegalCharacter") { return "E0001"; }
-    if (category == "InvalidSyntax") { return "E1001"; }
-    if (category == "NameError") { return "E2001"; }
-    if (category == "TypeError") { return "E3001"; }
+    if (category == "IllegalCharacter") {
+        return "E0001";
+    }
+    if (category == "InvalidSyntax") {
+        return "E1001";
+    }
+    if (category == "NameError") {
+        return "E2001";
+    }
+    if (category == "TypeError") {
+        return "E3001";
+    }
     if (category == "MissingInitializer") { return "E3002"; }
-    if (category == "NullDereferenceError") { return "E4001"; }
-    if (category == "IndexError") { return "E4002"; }
-    if (category == "ImportError") { return "E5001"; }
-    if (category == "InternalCompilerError") { return "E6001"; }
-    if (category == "ZeroDivisionError") { return "E7001"; }
-    if (category == "OverflowError") { return "E7002"; }
+    if (category == "NullDereferenceError") {
+        return "E4001";
+    }
+    if (category == "IndexError") {
+        return "E4002";
+    }
+    if (category == "ImportError") {
+        return "E5001";
+    }
+    if (category == "InternalCompilerError") {
+        return "E6001";
+    }
+    if (category == "ZeroDivisionError") {
+        return "E7001";
+    }
+    if (category == "OverflowError") {
+        return "E7002";
+    }
     if (category == "ExternError") { return "E8001"; }
     return "E0000";
 }
@@ -284,7 +308,12 @@ func abort_and_clean(status: Int) -> Void {
 }
 
 func report_error(pos: Position, name: String, details: String) -> Void {
-    if (COLLECT_ERRORS_ONLY && GLOBAL_ERROR_COUNT >= 50) { return; }
+    if (COLLECT_ERRORS_ONLY && GLOBAL_ERROR_COUNT >= 50) {
+        return;
+    }
+    if (pos.fn is null) { pos.fn = ""; }
+    if (pos.text is null) { pos.text = ""; }
+
     let error_key: String = pos.fn + ":" + pos.ln + ":" + pos.col + ":" + name + ":" + details;
     if (REPORTED_ERRORS is null) { REPORTED_ERRORS = Dict(); }
     if (REPORTED_ERRORS.contains_key(error_key)) { return; }
@@ -310,9 +339,7 @@ func report_error(pos: Position, name: String, details: String) -> Void {
     if (ERROR_BUFFER is null) { ERROR_BUFFER = []; }
     let err_msg: String = "";
 
-    if (LAST_ERROR_FILE != pos.fn) {
-        err_msg += "In file:\n";
-    }
+    if (LAST_ERROR_FILE != pos.fn) { err_msg += "In file:\n"; }
     err_msg += "   " + pos.fn + ":" + ln + ":" + col + "\n   | \n";
     LAST_ERROR_FILE = pos.fn;
 
@@ -337,14 +364,17 @@ func report_error(pos: Position, name: String, details: String) -> Void {
 
     if (start_idx < text.length()) {
         let line_text: String = text.slice(start_idx, end_idx);
-        
+
         let ln_str: String = "" + ln;
         let ln_width: Int = ln_str.length();
-        
+
         let empty_prefix: String = "  ";
         let p1: Int = 0;
-        while (p1 < ln_width) { empty_prefix = empty_prefix + " "; p1 += 1; }
-        
+        while (p1 < ln_width) {
+            empty_prefix = empty_prefix + " ";
+            p1 += 1;
+        }
+
         err_msg += " " + ln_str + " | " + line_text + "\n";
 
         let err_len: Int =
@@ -357,7 +387,9 @@ func report_error(pos: Position, name: String, details: String) -> Void {
         while (j < pos.col) {
             let unit: __SourceUnit = __source_unit(line_text, j);
             let width: Int = unit.width;
-            if (width <= 0) { break; }
+            if (width <= 0) {
+                break;
+            }
             if (Int(line_text[j]) == Int('\t')) {
                 caret_line += "\t";
             } else {
@@ -365,13 +397,13 @@ func report_error(pos: Position, name: String, details: String) -> Void {
             }
             j += width;
         }
-        
+
         let k: Int = 0;
         while (k < err_len) {
             caret_line = caret_line + "^";
             k += 1;
         }
-        
+
         err_msg += caret_line + "\n";
     }
 

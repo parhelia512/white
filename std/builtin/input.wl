@@ -10,9 +10,12 @@ import skip_bytes as stdin_skip_bytes from "../io/stdin.wl"
 import write_all as stdout_write_all from "../io/stdout.wl"
 import flush as stdout_flush from "../io/stdout.wl"
 
+
 func __prompt(text: String) -> Void? {
 // write prompts without adding a line ending
-    if (text is null || text.length() == 0) { return; }
+    if (text is null || text.length() == 0) {
+        return;
+    }
     stdout_write_all(text)?;
     stdout_flush()?;
     return;

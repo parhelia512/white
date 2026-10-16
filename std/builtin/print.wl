@@ -6,7 +6,7 @@ import "internal/runtime/string" as runtime_string
 
 @CompilerIntrinsic
 interface __Printable {
-    /* compiler internal implementation */
+/* compiler internal implementation */
 }
 
 @CompilerLink("print_bytes")
@@ -41,21 +41,27 @@ func write_raw_string(data: AnyPtr) -> Void {
 @CompilerLink("print_char")
 func write_char(c: Char) -> Void {
     let encoded: String = runtime_string.encode_utf8_char(c);
-    if (encoded is null) { return; }
+    if (encoded is null) {
+        return;
+    }
     write_bytes(runtime_string.data(encoded), encoded.length());
 }
 
 @CompilerLink("print_int")
 func write_int(value: Int) -> Void {
     let formatted: String = runtime.format_int(value);
-    if (formatted is null) { return; }
+    if (formatted is null) {
+        return;
+    }
     write_bytes(runtime_string.data(formatted), formatted.length());
 }
 
 @CompilerLink("print_long")
 func write_long(value: Long) -> Void {
     let formatted: String = runtime.format_long(value);
-    if (formatted is null) { return; }
+    if (formatted is null) {
+        return;
+    }
     write_bytes(runtime_string.data(formatted), formatted.length());
 }
 
@@ -75,5 +81,5 @@ func write_bool(value: Bool) -> Void {
 
 @CompilerIntrinsic("print")
 func print(values: __Printable..., sep: String = " ", end: String = "\n") -> Void {
-    /* compiler internal implementation */
+/* compiler internal implementation */
 }

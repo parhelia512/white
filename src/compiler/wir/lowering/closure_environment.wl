@@ -1,4 +1,4 @@
-// compiler/wir/lowering/closure_environment.wl
+// src/compiler/wir/lowering/closure_environment.wl
 
 import * from "../model.wl"
 import * from "../builder.wl"
@@ -11,16 +11,20 @@ import * from "declarations.wl"
 import * from "../../context.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+import throw_type_error from "../../../frontend/diagnostics.wl"
+
 
 func wir_reference_parameter(program: WirModule, binding: WirBinding) -> Bool {
-    if (binding.address == NO_WIR_VALUE) { return false; }
+    if (!binding.is_reference || binding.address == NO_WIR_VALUE) { return false; }
     return program.arena.values[wir_id_index(UInt32(binding.address))].kind == WirValueKind.FunctionParameter;
 }
 
-func wir_capture_binding(state: WirFunctionLowering, name: String) -> WirBinding? {
+func wir_capture_binding(ref state: WirFunctionLowering, name: String) -> WirBinding? {
     let i: Int = state.bindings.length() - 1;
     while (i >= 0) {
-        if (state.bindings[i].name == name) { return state.bindings[i]; }
+        if (state.bindings[i].name == name) {
+            return state.bindings[i];
+        }
         i--;
     }
     throw Error.InvalidData;
@@ -38,20 +42,26 @@ func wir_closure_captures(ref state: WirFunctionLowering, ref source: Compiler, 
         scope.local_vars.put(parameter.name_tok.value, true);
         i++;
     }
-    if (node.name_tok.value.length() != 0) { scope.local_vars.put(node.name_tok.value, true); }
+    if (node.name_tok.value.length() != 0) {
+        scope.local_vars.put(node.name_tok.value, true);
+    }
     analyze_captures(source.arena, node.body, scope);
 
     let captures: Vector(WirBinding) = [];
     i = 0;
     while (i < scope.captured_list.length()) {
         let name: String = scope.captured_list[i];
-        let binding: WirBinding = wir_capture_binding(state, name)?;
+        let binding: WirBinding = wir_capture_binding(ref state, name)?;
         catch(err) {
             i++;
             continue;
         }
-        if (wir_reference_parameter(program, binding)) {
-            state.errors.append("Local function '" + node.name_tok.value + "' cannot capture reference parameter '" + name + "'");
+        if (binding.is_reference) {
+            if (wir_reference_parameter(program, binding)) {
+                throw_type_error(node.pos, "Cannot capture reference parameter '" + name + "'.");
+            } else {
+                throw_type_error(node.pos, "Cannot capture reference binding '" + name + "'.");
+            }
             return null;
         }
         captures.append(binding);
@@ -76,12 +86,31 @@ func wir_closure_environment_type(ref types: WirTypeMap, ref source: Compiler, r
     return type_id;
 }
 
-func wir_closure_environment_drop(ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, env_type: WirTypeID, captures: Vector(WirBinding), name: String) -> WirFuncID {
+func wir_closure_environment_drop(
+    ref types: WirTypeMap,
+    ref source: Compiler,
+    ref program: WirModule,
+    env_type: WirTypeID,
+    captures: Vector(WirBinding),
+    name: String
+) -> WirFuncID {
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let function_id: WirFuncID = wir_add_function(ref program, name, [wir_param("environment", raw_pointer)], program.void_type, false, WirLinkage.Internal, WirABI.White);
     let function: WirFunction = program.arena.functions[wir_id_index(UInt32(function_id))];
     let entry: WirBlockID = wir_add_block(ref program, function_id, "entry", []);
-    let state: WirFunctionLowering = WirFunctionLowering(function=function_id, return_type=TYPE_VOID, entry=entry, block=entry, bindings=[], loops=[], error_targets=[], owned_values=[], errors=[], terminated=false, next_block=0);
+    let state: WirFunctionLowering = WirFunctionLowering(
+        function=function_id,
+        return_type=TYPE_VOID,
+        entry=entry,
+        block=entry,
+        bindings=[],
+        loops=[],
+        error_targets=[],
+        owned_values=[],
+        errors=[],
+        terminated=false,
+        next_block=0
+    );
     let environment: WirValueID = wir_cast(ref program, entry, function.parameters[0], wir_pointer_type(ref program, env_type), "environment", no_wir_location());
 
     let i: Int = 0;
@@ -102,8 +131,17 @@ func wir_closure_environment_drop(ref types: WirTypeMap, ref source: Compiler, r
     return function_id;
 }
 
-func wir_alloc_closure_environment(ref state: WirFunctionLowering, ref types: WirTypeMap, ref source: Compiler, ref program: WirModule, env_type: WirTypeID, captures: Vector(WirBinding), drop_id: WirFuncID, type_tag: Int) -> WirValueID {
-    let layout: WirTypeLayout = wir_type_layout(program, env_type);
+func wir_alloc_closure_environment(
+    ref state: WirFunctionLowering,
+    ref types: WirTypeMap,
+    ref source: Compiler,
+    ref program: WirModule,
+    env_type: WirTypeID,
+    captures: Vector(WirBinding),
+    drop_id: WirFuncID,
+    type_tag: Int
+) -> WirValueID {
+    let layout: WirTypeLayout = wir_lowering_layout(ref types, program, env_type);
     if (!layout.valid || layout.size > UInt64(wir_max_object_size(program.data_layout)) - UInt64(WIR_OBJECT_HEADER_SIZE)) {
         state.errors.append("Closure environment is too large for the target address space");
         return NO_WIR_VALUE;
@@ -114,16 +152,25 @@ func wir_alloc_closure_environment(ref state: WirFunctionLowering, ref types: Wi
         return NO_WIR_VALUE;
     }
     let allocator_id: WirFuncID = wir_find_function(program, allocator.name);
-    if (allocator_id == NO_WIR_FUNC) { allocator_id = wir_lower_function_decl(ref types, ref source, ref program, allocator); }
+    if (allocator_id == NO_WIR_FUNC) {
+        allocator_id = wir_lower_function_decl(ref types, ref source, ref program, allocator);
+    }
     if (allocator_id == NO_WIR_FUNC) { return NO_WIR_VALUE; }
 
     let size_type: WirTypeID = wir_unsigned_int_type(ref program, program.pointer_bits);
     let raw_pointer: WirTypeID = wir_opaque_pointer(ref types, ref program);
     let total_size: UInt64 = layout.size + UInt64(WIR_OBJECT_HEADER_SIZE);
-    let raw: WirValueID = wir_call(ref program, state.block, wir_function_value(program, allocator_id), [wir_const_int(ref program, size_type, UInt128(total_size))], "", no_wir_location());
+    let raw: WirValueID = wir_call(
+        ref program,
+        state.block,
+        wir_function_value(ref program, allocator_id),
+        [wir_const_int(ref program, size_type, UInt128(total_size))],
+        "",
+        no_wir_location()
+    );
     wir_append(ref program, state.block, WirOpcode.NullCheck, program.void_type, [raw], [], no_wir_location());
 
-    let drop_address: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(program, drop_id), 0L);
+    let drop_address: WirValueID = wir_const_address(ref program, raw_pointer, wir_function_value(ref program, drop_id), 0L);
     let drop_slot: WirValueID = wir_cast(ref program, state.block, raw, wir_pointer_type(ref program, raw_pointer), "", no_wir_location());
     wir_store(ref program, state.block, drop_address, drop_slot, no_wir_location());
     let uint32_type: WirTypeID = wir_unsigned_int_type(ref program, 32);

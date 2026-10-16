@@ -1,11 +1,12 @@
-// compiler/lowering/errors.wl
+// src/compiler/lowering/errors.wl
 import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 import * from "dictionary.wl"
 
+
 func emit_error_value(ref c: Compiler, value: CompileResult, pos: Position) -> CompileResult {
-    // attach a stable error-domain id to a concrete error enum value
+// attach a stable error-domain id to a concrete error enum value
     if (value.type == TYPE_ANY_ERROR) { return value; }
 
     let error_type: Int = value.type;
@@ -19,7 +20,9 @@ func emit_error_value(ref c: Compiler, value: CompileResult, pos: Position) -> C
 
     let with_domain: String = next_reg(ref c);
     c.output_file.write(c.indent + with_domain + " = insertvalue { i64, i32 } undef, i64 " + type_fingerprint(ref c, error_type) + ", 0\n");
+
     let result: String = next_reg(ref c);
     c.output_file.write(c.indent + result + " = insertvalue { i64, i32 } " + with_domain + ", i32 " + value.reg + ", 1\n");
+
     return CompileResult(reg=result, type=TYPE_ANY_ERROR);
 }

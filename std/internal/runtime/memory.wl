@@ -5,6 +5,7 @@ import "sys"
 import "internal/platform/windows"
 import "internal/platform/posix"
 
+
 func pointer_size() -> UIntSize {
     return size_of(AnyPtr);
 }
@@ -29,7 +30,9 @@ func mem_alloc_zeroed(size: UIntSize) -> AnyPtr {
 
 @CompilerLink("memory_resize")
 func mem_resize(block: AnyPtr, size: UIntSize) -> AnyPtr {
-    if (block is nullptr) { return mem_alloc(size); }
+    if (block is nullptr) {
+        return mem_alloc(size);
+    }
     if (size == UIntSize(0)) { size = UIntSize(1); }
     if (sys.OS == sys.Os.Windows) {
         return windows.HeapReAlloc(windows.GetProcessHeap(), 0, block, size);

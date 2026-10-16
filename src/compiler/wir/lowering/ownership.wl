@@ -1,15 +1,16 @@
-// compiler/wir/lowering/ownership.wl
+// src/compiler/wir/lowering/ownership.wl
 
 import * from "../model.wl"
 import * from "../builder.wl"
 import * from "state.wl"
 import * from "../../context.wl"
 
+
 func wir_value_needs_drop(ref source: Compiler, source_type: Int) -> Bool {
     return needs_drop(ref source, source_type);
 }
 
-func wir_owned_value_index(state: WirFunctionLowering, value: WirValueID) -> Int {
+func wir_owned_value_index(ref state: WirFunctionLowering, value: WirValueID) -> Int {
     let i: Int = state.owned_values.length() - 1;
     while (i >= 0) {
         if (state.owned_values[i].value == value) { return i; }
@@ -19,17 +20,21 @@ func wir_owned_value_index(state: WirFunctionLowering, value: WirValueID) -> Int
 }
 
 func wir_track_owned(ref state: WirFunctionLowering, value: WirValueID, source_type: Int) -> Void {
-    if (value == NO_WIR_VALUE || wir_owned_value_index(state, value) >= 0) { return; }
+    if (value == NO_WIR_VALUE || wir_owned_value_index(ref state, value) >= 0) {
+        return;
+    }
     state.owned_values.append(WirOwnedValue(value=value, source_type=source_type));
 }
 
 func wir_take_owned(ref state: WirFunctionLowering, value: WirValueID) -> Bool {
-    let index: Int = wir_owned_value_index(state, value);
+    let index: Int = wir_owned_value_index(ref state, value);
     if (index < 0) { return false; }
     let values: Vector(WirOwnedValue) = [];
     let i: Int = 0;
     while (i < state.owned_values.length()) {
-        if (i != index) { values.append(state.owned_values[i]); }
+        if (i != index) {
+            values.append(state.owned_values[i]);
+        }
         i++;
     }
     state.owned_values = values;
@@ -45,17 +50,17 @@ func wir_arc_pointer(ref state: WirFunctionLowering, ref source: Compiler, ref p
     }
     let array: ArrayInfo = ArrayInfo();
     if (source.array_info_map is !null) { array = source.array_info_map.lookup("" + repr); }
-    if (has_array_info(array) && array.size == -1) {
-        return value;
-    }
-    let type_id: WirTypeID = wir_value_type(program, value);
+    if (has_array_info(array) && array.size == -1) { return value; }
+    let type_id: WirTypeID = wir_value_type(ref program, value);
     if (program.arena.types[wir_id_index(UInt32(type_id))].kind == WirTypeKind.Pointer) { return value; }
     state.errors.append("ARC value has no payload pointer in WIR lowering");
     return NO_WIR_VALUE;
 }
 
 func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirValueID, source_type: Int, retain: Bool) -> Void {
-    if (!wir_value_needs_drop(ref source, source_type)) { return; }
+    if (!wir_value_needs_drop(ref source, source_type)) {
+        return;
+    }
     if (is_fallible_type(ref source, source_type)) {
         let inner_type: Int = get_inner_fallible_type(ref source, source_type);
         if (inner_type == TYPE_VOID || !wir_value_needs_drop(ref source, inner_type)) { return; }
@@ -103,19 +108,27 @@ func wir_emit_ownership_value(ref state: WirFunctionLowering, ref source: Compil
 
     if (!is_ref_type(ref source, source_type)) { return; }
     let pointer: WirValueID = wir_arc_pointer(ref state, ref source, ref program, value, source_type);
-    if (pointer == NO_WIR_VALUE) { return; }
-    if (retain) { wir_retain(ref program, state.block, pointer, no_wir_location()); }
+    if (pointer == NO_WIR_VALUE) {
+        return;
+    }
+    if retain {
+        wir_retain(ref program, state.block, pointer, no_wir_location());
+    }
     else { wir_release(ref program, state.block, pointer, no_wir_location()); }
 }
 
 func wir_emit_ownership_slot(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, address: WirValueID, source_type: Int, retain: Bool) -> Void {
-    if (!wir_value_needs_drop(ref source, source_type)) { return; }
+    if (!wir_value_needs_drop(ref source, source_type)) {
+        return;
+    }
     let value: WirValueID = wir_load(ref program, state.block, address, "", no_wir_location());
     wir_emit_ownership_value(ref state, ref source, ref program, value, source_type, retain);
 }
 
 func wir_move_or_retain(ref state: WirFunctionLowering, ref source: Compiler, ref program: WirModule, value: WirExpr) -> Void {
-    if (!wir_value_needs_drop(ref source, value.source_type)) { return; }
+    if (!wir_value_needs_drop(ref source, value.source_type)) {
+        return;
+    }
     if (!wir_take_owned(ref state, value.value)) {
         wir_emit_ownership_value(ref state, ref source, ref program, value.value, value.source_type, true);
     }

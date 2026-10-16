@@ -1,6 +1,7 @@
-// frontend/ast.wl
+// src/frontend/ast.wl
 import Token from "tokens.wl"
 import Position, no_position, throw_internal_compiler_error from "diagnostics.wl"
+
 
 const NODE_INT            : Int = 1;
 const NODE_FLOAT          : Int = 2;
@@ -65,8 +66,6 @@ const NODE_TYPE_DECL      : Int = 60;
 const PARAM_VALUE : Int = 0;
 const PARAM_REF   : Int = 1;
 
-
-
 type NodeID = UInt32;
 
 const NO_NODE: NodeID = NodeID(0U);
@@ -103,12 +102,12 @@ struct IntNode(
 
 struct FloatNode(
     type  : Int,
-    tok   : Token, 
+    tok   : Token,
     pos   : Position
 )
 
 struct BooleanNode(
-    type : Int, 
+    type : Int,
     tok : Token,
     value : Int, // 1 for true, 0 for false
     pos   : Position
@@ -124,14 +123,14 @@ struct BinOpNode(
     type     : Int,
     left     : NodeID,
     op_tok   : Token,    // Token object
-    right    : NodeID, 
+    right    : NodeID,
     pos      : Position
 )
 
 struct UnaryOpNode(
     type   : Int,
     op_tok : Token,
-    node   : NodeID, 
+    node   : NodeID,
     pos    : Position
 )
 
@@ -146,8 +145,8 @@ struct VarDeclareNode(
     type         : Int,    // NODE_VAR_DECL
     name_tok     : Token,  // Variable Name Token
     type_node    : NodeID,  // Type Name Token
-    value        : NodeID, 
-    is_const     : Bool, 
+    value        : NodeID,
+    is_const     : Bool,
     annotations  : Vector(AnnotationNode),
     pos          : Position,    // Error position
     alloc_id     : Int
@@ -240,7 +239,6 @@ struct ParamNode(
     default_val : NodeID
 )
 
-
 struct ParamListNode(
     param : ParamNode
 )
@@ -255,7 +253,6 @@ struct GenericParamNode(
     constraints : Vector(NodeID),
     pos : Position
 )
-
 
 // func name(params...) : RetType { body }
 struct FunctionDefNode(
@@ -316,7 +313,6 @@ struct FieldAssignNode(type : Int,
     value : NodeID,
     pos : Position
 )
-
 
 struct PointerTypeNode(
     type      : Int,    // NODE_PTR_TYPE
@@ -525,7 +521,7 @@ struct TryUnwrapNode(
 struct CatchNode(
     type     : Int, // NODE_CATCH
     stmt     : NodeID,
-    err_name : Token, 
+    err_name : Token,
     body     : NodeID, // BlockNode
     pos      : Position,
     alloc_id : Int

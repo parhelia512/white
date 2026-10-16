@@ -6,8 +6,11 @@ import "internal/platform/windows"
 import "internal/platform/posix"
 import "string.wl" as runtime_string
 
+
 func write_err(message: String) -> Void {
-    if (message is null || message.length() == 0) { return; }
+    if (message is null || message.length() == 0) {
+        return;
+    }
     if (sys.OS == sys.Os.Windows) {
         let handle: AnyPtr = windows.GetStdHandle(windows.STD_ERROR_HANDLE);
         if (!windows.is_invalid_handle(handle)) {
@@ -16,6 +19,7 @@ func write_err(message: String) -> Void {
         }
         return;
     }
+
     posix.write(2, runtime_string.data(message), UIntSize(message.length()));
 }
 
@@ -33,11 +37,15 @@ func panic_out_of_memory(owner: String) -> Void {
 }
 
 func __free_startup_args(count: Int, storage: AnyPtr) -> Void {
-    if (sys.OS != sys.Os.Windows || storage is nullptr) { return; }
+    if (sys.OS != sys.Os.Windows || storage is nullptr) {
+        return;
+    }
     let ptr args: AnyPtr = storage;
     let i: Int = 0;
     while (i < count) {
-        if (args[i] is !nullptr) { windows.HeapFree(windows.GetProcessHeap(), 0, args[i]); }
+        if (args[i] is !nullptr) {
+            windows.HeapFree(windows.GetProcessHeap(), 0, args[i]);
+        }
         i += 1;
     }
     windows.HeapFree(windows.GetProcessHeap(), 0, storage);
@@ -70,7 +78,9 @@ func startup_args(ptr argc: Int) -> AnyPtr {
 
         args[i] = windows.HeapAlloc(windows.GetProcessHeap(), 0, UIntSize(length));
         if (args[i] is nullptr || windows.WideCharToMultiByte(windows.CP_UTF8, windows.WC_ERR_INVALID_CHARS, wide_args[i], -1, args[i], length, nullptr, nullptr) <= 0) {
-            if (args[i] is !nullptr) { windows.HeapFree(windows.GetProcessHeap(), 0, args[i]); }
+            if (args[i] is !nullptr) {
+                windows.HeapFree(windows.GetProcessHeap(), 0, args[i]);
+            }
             args[i] = nullptr;
             __free_startup_args(i, storage);
             windows.LocalFree(wide_argv);
@@ -85,7 +95,9 @@ func startup_args(ptr argc: Int) -> AnyPtr {
 
 @CompilerLink("startup_args_free")
 func free_startup_args(argc: Int, argv: AnyPtr) -> Void {
-    if (sys.OS == sys.Os.Windows) { __free_startup_args(argc, argv); }
+    if (sys.OS == sys.Os.Windows) {
+        __free_startup_args(argc, argv);
+    }
 }
 
 @CompilerLink("process_exit")

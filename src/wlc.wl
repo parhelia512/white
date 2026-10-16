@@ -13,6 +13,7 @@ import "compiler/pipeline.wl" as WhitelangCompiler
 import "compiler/context.wl" as WhitelangUtils
 import "compiler/target.wl" as WhitelangTarget
 import "compiler/wir/pipeline.wl" as WhitelangWIR
+import "compiler/machine/pipeline.wl" as WhitelangMachine
 
 
 const VERSION      : String = "devel";
@@ -28,6 +29,7 @@ struct CompilerConfig(
     is_compile_only : Bool,  // -c
     is_asm_only     : Bool,  // -S
     is_emit_llvm    : Bool,  // --emit-llvm
+    is_emit_wir     : Bool,  // --emit-wir
     debug_info      : Bool,  // -g
     opt_level       : String,
     verbose         : Bool,
@@ -53,6 +55,7 @@ func print_usage() -> Void {
     print("  -c                     Compile and assemble, but do not link");
     print("  -S                     Compile only; do not assemble or link");
     print("  --emit-llvm            Use the LLVM representation for assembler and object files");
+    print("  --emit-wir             Write optimized WIR and stop before target lowering");
     print("  -O<level>              Optimization level (0, 1, 2, 3, s, z). Default: 2");
     print("  -g                     Generate source-level debug information");
     print("  -L <dir>               Add <dir> to the linker library search path");
@@ -63,7 +66,7 @@ func print_usage() -> Void {
     print("  --dump-ir              Dump LLVM IR to stdout");
     print("  --keep-temps           Do not delete intermediate LLVM IR files");
     print("  --shared               Build a shared library (dll, so, dylib)");
-    print("  --backend <name>       Select the compiler backend (llvm or wir)");
+    print("  --backend <name>       Select the compiler backend (llvm, wir, or machine)");
     print("  --target <triple>      Build for a supported target triple");
     print("  --target-help          Display supported target triples");
     print("  --sysroot <dir>        Use <dir> as the target system root");
@@ -85,7 +88,10 @@ func clang_program() -> String {
 }
 
 func print_version(verbose: Bool) -> Void {
-    if (!verbose) { print("White Language Compiler " + VERSION); return; }
+    if (!verbose) {
+        print("White Language Compiler " + VERSION);
+        return;
+    }
 
     print("wlc " + VERSION);
     print("release: " + VERSION);
@@ -102,7 +108,9 @@ func print_version(verbose: Bool) -> Void {
         print("clang-version: unavailable");
         return;
     }
-    if (status != 0) { print("clang-version: unavailable"); }
+    if (status != 0) {
+        print("clang-version: unavailable");
+    }
 }
 
 func has_argument(argc: Int, ptr argv: String, expected: String) -> Bool {
@@ -195,7 +203,10 @@ func main(argc: Int, ptr argv: String) -> Int {
         return 1;
     }
 
-    if (has_argument(argc, argv, "-h") || has_argument(argc, argv, "--help")) { print_usage(); return 0; }
+    if (has_argument(argc, argv, "-h") || has_argument(argc, argv, "--help")) {
+        print_usage();
+        return 0;
+    }
     let wants_version: Bool = has_argument(argc, argv, "-V") || has_argument(argc, argv, "--version") || has_argument(argc, argv, "-vV");
     if wants_version {
         let verbose_version: Bool = has_argument(argc, argv, "-vV") || has_argument(argc, argv, "-v") || has_argument(argc, argv, "--verbose");
@@ -212,6 +223,7 @@ func main(argc: Int, ptr argv: String) -> Int {
         is_compile_only = false,
         is_asm_only     = false,
         is_emit_llvm    = false,
+        is_emit_wir     = false,
         debug_info      = false,
         opt_level       = "-O2",
         verbose         = false,
@@ -228,60 +240,120 @@ func main(argc: Int, ptr argv: String) -> Int {
     while (i < argc) {
         let arg: String = process.argument(argc, argv, i);
 
-        if (arg == "--target-help") { print_target_help(); return 0; }
-        else if (arg == "-v" || arg == "--verbose") { cfg.verbose = true; }
-        else if (arg == "--dump-ast") { cfg.dump_ast = true; }
-        else if (arg == "--dump-ir") { cfg.dump_ir = true; }
-        else if (arg == "--keep-temps") { cfg.keep_temps = true; }
-        else if (arg == "-c") { cfg.is_compile_only = true; }
+        if (arg == "--target-help") {
+            print_target_help();
+            return 0;
+        }
+        else if (arg == "-v" || arg == "--verbose") {
+            cfg.verbose = true;
+        }
+        else if (arg == "--dump-ast") {
+            cfg.dump_ast = true;
+        }
+        else if (arg == "--dump-ir") {
+            cfg.dump_ir = true;
+        }
+        else if (arg == "--keep-temps") {
+            cfg.keep_temps = true;
+        }
+        else if (arg == "-c") {
+            cfg.is_compile_only = true;
+        }
         else if (arg == "-S") { cfg.is_asm_only = true; }
         else if (arg == "--shared") { cfg.is_shared = true; }
-        else if (arg == "--emit-llvm") { cfg.is_emit_llvm = true; }
+        else if (arg == "--emit-llvm") {
+            cfg.is_emit_llvm = true;
+        }
+        else if (arg == "--emit-wir") {
+            cfg.is_emit_wir = true;
+        }
         else if (arg == "--backend") {
             i++;
-            if (i >= argc) { print("Error: --backend requires an argument"); return 1; }
+            if (i >= argc) {
+                print("Error: --backend requires an argument");
+                return 1;
+            }
             cfg.backend = process.argument(argc, argv, i);
         }
         else if (arg.starts_with("--backend=")) {
-            if (arg.length() == 10) { print("Error: --backend requires an argument"); return 1; }
+            if (arg.length() == 10) {
+                print("Error: --backend requires an argument");
+                return 1;
+            }
             cfg.backend = arg.slice(10, arg.length());
         }
-        else if (arg == "-g") { cfg.debug_info = true; }
-        else if (arg == "-O0") { cfg.opt_level = "-O0"; }
+        else if (arg == "-g") {
+            cfg.debug_info = true;
+        }
+        else if (arg == "-O0") {
+            cfg.opt_level = "-O0";
+        }
         else if (arg == "-O1") { cfg.opt_level = "-O1"; }
-        else if (arg == "-O2") { cfg.opt_level = "-O2"; }
-        else if (arg == "-O3") { cfg.opt_level = "-O3"; }
-        else if (arg == "-Os") { cfg.opt_level = "-Os"; }
-        else if (arg == "-Oz") { cfg.opt_level = "-Oz"; }
+        else if (arg == "-O2") {
+            cfg.opt_level = "-O2";
+        }
+        else if (arg == "-O3") {
+            cfg.opt_level = "-O3";
+        }
+        else if (arg == "-Os") {
+            cfg.opt_level = "-Os";
+        }
+        else if (arg == "-Oz") {
+            cfg.opt_level = "-Oz";
+        }
         else if (arg == "--target") {
             i++;
-            if (i >= argc) { print("Error: --target requires an argument"); return 1; }
+            if (i >= argc) {
+                print("Error: --target requires an argument");
+                return 1;
+            }
             cfg.target_triple = process.argument(argc, argv, i);
         }
         else if (arg.starts_with("--target=")) {
-            if (arg.length() == 9) { print("Error: --target requires an argument"); return 1; }
+            if (arg.length() == 9) {
+                print("Error: --target requires an argument");
+                return 1;
+            }
             cfg.target_triple = arg.slice(9, arg.length());
         }
         else if (arg == "--sysroot") {
             i++;
-            if (i >= argc) { print("Error: --sysroot requires an argument"); return 1; }
+            if (i >= argc) {
+                print("Error: --sysroot requires an argument");
+                return 1;
+            }
             cfg.sysroot = process.argument(argc, argv, i);
-            if (cfg.sysroot.length() == 0) { print("Error: --sysroot requires an argument"); return 1; }
+            if (cfg.sysroot.length() == 0) {
+                print("Error: --sysroot requires an argument");
+                return 1;
+            }
         }
         else if (arg.starts_with("--sysroot=")) {
-            if (arg.length() == 10) { print("Error: --sysroot requires an argument"); return 1; }
+            if (arg.length() == 10) {
+                print("Error: --sysroot requires an argument");
+                return 1;
+            }
             cfg.sysroot = arg.slice(10, arg.length());
         }
         else if (arg == "-o") {
             i++;
-            if (i >= argc) { print("Error: -o requires an argument"); return 1; }
+            if (i >= argc) {
+                print("Error: -o requires an argument");
+                return 1;
+            }
             cfg.output_file = process.argument(argc, argv, i);
         }
         else if (arg == "-L" || arg == "--library-path") {
             i++;
-            if (i >= argc) { print("Error: " + arg + " requires an argument"); return 1; }
+            if (i >= argc) {
+                print("Error: " + arg + " requires an argument");
+                return 1;
+            }
             let library_path: String = process.argument(argc, argv, i);
-            if (library_path.length() == 0) { print("Error: Library search path cannot be empty"); return 1; }
+            if (library_path.length() == 0) {
+                print("Error: Library search path cannot be empty");
+                return 1;
+            }
             cfg.library_paths.append(library_path);
         }
         else if (arg.starts_with("-L") && arg.length() > 2) {
@@ -289,7 +361,10 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
         else if (arg == "--ldflags") {
             i++;
-            if (i >= argc) { print("Error: --ldflags requires an argument"); return 1; }
+            if (i >= argc) {
+                print("Error: --ldflags requires an argument");
+                return 1;
+            }
             let flags: Vector(String) = split_link_flags(process.argument(argc, argv, i));
             let flag_idx: Int = 0;
             while (flag_idx < flags.length()) {
@@ -311,8 +386,12 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("Error: No input file.");
         return 1;
     }
-    if (cfg.backend != "llvm" && cfg.backend != "wir") {
-        print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm' or 'wir'.");
+    if (cfg.backend != "llvm" && cfg.backend != "wir" && cfg.backend != "machine") {
+        print("Error: Unsupported backend '" + cfg.backend + "'. Expected 'llvm', 'wir', or 'machine'.");
+        return 1;
+    }
+    if (cfg.is_emit_wir && (cfg.is_emit_llvm || cfg.is_asm_only || cfg.is_compile_only || cfg.is_shared || cfg.dump_ir)) {
+        print("Error: --emit-wir cannot be combined with -S, -c, --shared, --emit-llvm, or --dump-ir.");
         return 1;
     }
     if (!WhitelangTarget.select_target(cfg.target_triple)) {
@@ -320,25 +399,36 @@ func main(argc: Int, ptr argv: String) -> Int {
         print("Run 'wlc --target-help' to list supported targets.");
         return 1;
     }
+    if (cfg.backend == "machine") {
+        let machine_target: String = WhitelangTarget.get_target_triple();
+        if (machine_target != "x86_64-pc-windows-msvc" && machine_target != "x86_64-unknown-linux-gnu") {
+            print("Error: The machine backend currently supports x86_64 Windows and Linux targets.");
+            return 1;
+        }
+        if (cfg.is_emit_llvm || cfg.is_asm_only || cfg.dump_ir || cfg.debug_info) {
+            print("Error: The machine backend does not support -S, --emit-llvm, --dump-ir, or -g yet.");
+            return 1;
+        }
+    }
 
     let base_name: String = get_base_name(cfg.source_file);
     let ll_file: String = "";
-    
+
     if (cfg.keep_temps || cfg.is_emit_llvm) {
         ll_file = base_name + ".ll";
     } else {
         let temp_dir: String = "";
-        
+
         if (sys.OS == sys.Os.Windows) {
             temp_dir = sys.env.get_env("TMP");
             if (temp_dir is null) { temp_dir = sys.env.get_env("TEMP"); }
             if (temp_dir is null) { temp_dir = "."; }
-            
-            if (!temp_dir.ends_with("\\") && !temp_dir.ends_with("/")) {
-                temp_dir += "\\";
-            }
+
+            if (!temp_dir.ends_with("\\") && !temp_dir.ends_with("/")) { temp_dir += "\\"; }
         } else {
-            temp_dir = "/tmp/";
+            temp_dir = sys.env.get_env("TMPDIR");
+            if (temp_dir is null || temp_dir.length() == 0) { temp_dir = "/tmp"; }
+            if (!temp_dir.ends_with("/")) { temp_dir += "/"; }
         }
 
         let file_only: String = base_name;
@@ -356,35 +446,51 @@ func main(argc: Int, ptr argv: String) -> Int {
         ll_file = temp_dir + "wlc_tmp_" + file_only + "_" + process.id() + ".ll";
     }
 
-    if (!cfg.keep_temps && !cfg.is_emit_llvm) {
+    if (cfg.backend != "machine" && !cfg.is_emit_wir && !cfg.keep_temps && !cfg.is_emit_llvm) {
         WhitelangExceptions.CLEAN_TMP_LL = ll_file;
     }
 
     if (cfg.output_file.length() == 0) {
-        if (cfg.is_asm_only) {
+        if (cfg.is_emit_wir) { cfg.output_file = base_name + ".wir"; }
+        else if (cfg.is_asm_only) {
             if (cfg.is_emit_llvm) { cfg.output_file = base_name + ".ll"; }
             else { cfg.output_file = base_name + ".s"; }
         }
         else if (cfg.is_compile_only) {
             if (cfg.is_emit_llvm) { cfg.output_file = base_name + ".bc"; }
-            else { 
-                if (WhitelangTarget.get_target_binary_format() == sys.BinaryFormat.Coff) { cfg.output_file = base_name + ".obj"; }
+            else {
+                if (WhitelangTarget.get_target_binary_format() == sys.BinaryFormat.Coff) {
+                    cfg.output_file = base_name + ".obj";
+                }
                 else { cfg.output_file = base_name + ".o"; }
             }
         }
         else if (cfg.is_shared) {
-            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { 
-                cfg.output_file = base_name + ".dll"; 
-            } else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) { 
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
+                cfg.output_file = base_name + ".dll";
+            } else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) {
                 cfg.output_file = "lib" + base_name + ".dylib";
-            } else { 
-                cfg.output_file = "lib" + base_name + ".so"; 
+            } else {
+                cfg.output_file = "lib" + base_name + ".so";
             }
         }
         else { // EXE
-            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { cfg.output_file = base_name + ".exe"; }
+            if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
+                cfg.output_file = base_name + ".exe";
+            }
             else { cfg.output_file = base_name; }
         }
+    }
+
+    let machine_file: String = "";
+    if (cfg.backend == "machine" && !cfg.is_emit_wir) {
+        let object_suffix: String = ".obj";
+        if (WhitelangTarget.get_target_binary_format() != sys.BinaryFormat.Coff) { object_suffix = ".o"; }
+        if (cfg.is_compile_only) { machine_file = cfg.output_file; }
+        else if (cfg.keep_temps) {
+            machine_file = base_name + object_suffix;
+        }
+        else { machine_file = ll_file.slice(0, ll_file.length() - 3) + object_suffix; }
     }
 
     log_stage(cfg, "Frontend & Middle-end");
@@ -409,25 +515,79 @@ func main(argc: Int, ptr argv: String) -> Int {
     WhitelangExceptions.check_errors_and_abort();
     if (cfg.verbose) { print("Parsed source: " + cfg.source_file); }
 
-    if (cfg.dump_ast) { print("[Debug] AST Dumped"); }
+    if (cfg.dump_ast) {
+        print("[Debug] AST Dumped");
+    }
 
-    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(ll_file, cfg.is_shared, cfg.debug_info, arena)?;
+    let compiler_output: String = ll_file;
+    if (cfg.backend == "machine" || cfg.is_emit_wir) { compiler_output = ""; }
+    let compiler: WhitelangUtils.Compiler = WhitelangUtils.new_compiler(compiler_output, cfg.is_shared, cfg.debug_info, arena)?;
     catch(err) {
-        print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
+        if (cfg.backend == "machine" || cfg.is_emit_wir) {
+            print("Error: Could not initialize the compiler (error " + Int(err) + ")");
+        } else {
+            print("Error: Could not create temporary IR file " + ll_file + " (error " + Int(err) + ")");
+        }
         return 1;
     }
     compiler.current_dir = WhitelangUtils.get_dir_name(cfg.source_file);
     WhitelangExceptions.ACTIVE_FILE = compiler.output_file;
-    if (cfg.backend == "wir") {
-        WhitelangCompiler.prepare_program(ref compiler, ast);
+    if (cfg.is_emit_wir) {
+        WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
         WhitelangExceptions.check_errors_and_abort();
 
-        let result: WhitelangWIR.WirPipelineResult = WhitelangWIR.lower_program_to_llvm(ref compiler, compiler.all_modules, WhitelangTarget.get_target_triple(), WhitelangTarget.get_target_pointer_bits())?;
+        let result: WhitelangWIR.WirPipelineResult = WhitelangWIR.lower_program_to_wir_text(
+            ref compiler,
+            compiler.all_modules,
+            WhitelangTarget.get_target_triple(),
+            WhitelangTarget.get_target_pointer_bits(),
+            cfg.opt_level
+        )?;
+        catch(err) {
+            print("Build Failed: Could not produce WIR output.");
+            return 1;
+        }
+        if (result.errors.length() != 0) {
+            let error_index: Int = 0;
+            while (error_index < result.errors.length()) {
+                print("InternalCompilerError: " + result.errors[error_index]);
+                error_index++;
+            }
+            return 1;
+        }
+
+        let wir_file: file.File = file.create(cfg.output_file)?;
+        catch(err) {
+            print("Build Failed: Could not create WIR file " + cfg.output_file + ".");
+            return 1;
+        }
+
+        wir_file.write(result.text);
+
+        if (wir_file.last_error() != file.Error.None) {
+            wir_file.close();
+            print("Build Failed: Could not write WIR file " + cfg.output_file + ".");
+            return 1;
+        }
+        wir_file.close();
+        print("Generated: " + cfg.output_file);
+        return 0;
+    } else if (cfg.backend == "wir") {
+        WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
+        WhitelangExceptions.check_errors_and_abort();
+
+        let result: WhitelangWIR.WirPipelineResult = WhitelangWIR.lower_program_to_llvm(
+            ref compiler,
+            compiler.all_modules,
+            WhitelangTarget.get_target_triple(),
+            WhitelangTarget.get_target_pointer_bits()
+        )?;
         catch(err) {
             compiler.output_file.close();
             print("Build Failed: WIR backend ran out of memory while producing LLVM IR.");
             return 1;
         }
+        WhitelangExceptions.check_errors_and_abort();
         if (result.errors.length() != 0) {
             compiler.output_file.close();
             let error_index: Int = 0;
@@ -437,17 +597,63 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
             return 1;
         }
+
         compiler.output_file.write(result.text);
+
         compiler.output_file.close();
+    } else if (cfg.backend == "machine") {
+        WhitelangCompiler.prepare_program(ref compiler, ast, cfg.verbose);
+        WhitelangExceptions.check_errors_and_abort();
+
+        let result: WhitelangMachine.MachinePipelineResult = WhitelangMachine.lower_program_to_machine(
+            ref compiler,
+            compiler.all_modules,
+            WhitelangTarget.get_target_triple(),
+            WhitelangTarget.get_target_pointer_bits(),
+            cfg.verbose,
+            cfg.opt_level
+        )?;
+        catch(err) {
+            print("Build Failed: Machine backend ran out of memory while producing the object file.");
+            return 1;
+        }
+        WhitelangExceptions.check_errors_and_abort();
+        if (result.errors.length() != 0) {
+            let error_index: Int = 0;
+            while (error_index < result.errors.length()) {
+                print("InternalCompilerError: " + result.errors[error_index]);
+                error_index++;
+            }
+            return 1;
+        }
+        let object_file: file.File = file.create(machine_file)?;
+        catch(err) {
+            print("Build Failed: Could not create machine object file " + machine_file + ".");
+            return 1;
+        }
+        object_file.write_bytes(result.bytes)?;
+        catch(err) {
+            object_file.close();
+            print("Build Failed: Could not write machine object file " + machine_file + ".");
+            return 1;
+        }
+        object_file.close();
     } else {
         WhitelangCompiler.compile(ref compiler, ast);
     }
-    if (cfg.verbose) { print("Lowered source through the " + cfg.backend + " backend"); }
+    if (cfg.verbose) {
+        print("Lowered source through the " + cfg.backend + " backend");
+    }
 
     WhitelangExceptions.check_errors_and_abort();
-    if (compiler.output_file.last_error() != file.Error.None) {
+    if (compiler.output_file is !null && compiler.output_file.last_error() != file.Error.None) {
         print("Error: Could not write temporary IR file " + ll_file);
         return 1;
+    }
+
+    if (cfg.backend == "machine" && cfg.is_compile_only) {
+        print("Build success: " + cfg.output_file);
+        return 0;
     }
 
     if (cfg.dump_ir) {
@@ -466,7 +672,9 @@ func main(argc: Int, ptr argv: String) -> Int {
     }
 
     if (cfg.is_asm_only && cfg.is_emit_llvm) {
-        if (cfg.output_file != ll_file) { print("Generated: " + ll_file); }
+        if (cfg.output_file != ll_file) {
+            print("Generated: " + ll_file);
+        }
         return 0;
     }
 
@@ -475,8 +683,13 @@ func main(argc: Int, ptr argv: String) -> Int {
     let system_clang: String = "clang";
     if (sys.OS == sys.Os.Windows) { system_clang = "clang.exe"; }
     let using_portable_clang: Bool = clang_cmd != system_clang;
-    if (cfg.verbose && using_portable_clang) { print("Using portable LLVM: " + clang_cmd); }
-    else if (cfg.verbose) { print("Portable LLVM not found, falling back to system " + clang_cmd + "."); }
+    let using_mingw_linker: Bool = cfg.backend == "machine" && using_portable_clang && WhitelangTarget.get_target_os() == sys.Os.Windows;
+    if (cfg.verbose && using_portable_clang) {
+        print("Using portable LLVM: " + clang_cmd);
+    }
+    else if (cfg.verbose) {
+        print("Portable LLVM not found, falling back to system " + clang_cmd + ".");
+    }
 
     let import_lib: String = "";
     if (cfg.is_shared && WhitelangTarget.get_target_os() == sys.Os.Windows) {
@@ -489,26 +702,45 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
         }
     }
-    
+
     let clang_args: Vector(String) = [];
     let size_opt: Bool = cfg.opt_level == "-Os" || cfg.opt_level == "-Oz";
     if (cfg.debug_info) { clang_args.append("-g"); }
-    if (cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) { clang_args.append("--target=" + WhitelangTarget.get_target_triple()); }
-    if (cfg.sysroot.length() > 0) { clang_args.append("--sysroot=" + cfg.sysroot); }
-    clang_args.append("-Wno-override-module");
-    clang_args.append(cfg.opt_level);
-    if (cfg.opt_level == "-Oz") {
-        clang_args.append("-mllvm");
-        clang_args.append("-inline-threshold=0");
-        clang_args.append("-fno-vectorize");
-        clang_args.append("-fno-slp-vectorize");
-        clang_args.append("-fno-unroll-loops");
+    if using_mingw_linker {
+        clang_args.append("--target=x86_64-w64-windows-gnu");
+    }
+    else if (cfg.backend == "machine" || cfg.target_triple != "native" || WhitelangTarget.get_target_arch() == sys.Arch.X86) {
+        clang_args.append("--target=" + WhitelangTarget.get_target_triple());
+    }
+    // The Windows portable clang bundle normally discovers MinGW ld.exe.
+    // That linker cannot consume an ELF target, so make the cross-link choice
+    // explicit when a Windows host is producing a Linux executable.
+    if (sys.OS == sys.Os.Windows &&
+        WhitelangTarget.get_target_os() == sys.Os.Linux) {
+        clang_args.append("-fuse-ld=lld");
+    }
+    if (cfg.sysroot.length() > 0) {
+        clang_args.append("--sysroot=" + cfg.sysroot);
+    }
+    if (cfg.backend != "machine") {
+        clang_args.append("-Wno-override-module");
+        clang_args.append(cfg.opt_level);
+        if (cfg.opt_level == "-Oz") {
+            clang_args.append("-mllvm");
+            clang_args.append("-inline-threshold=0");
+            clang_args.append("-fno-vectorize");
+            clang_args.append("-fno-slp-vectorize");
+            clang_args.append("-fno-unroll-loops");
+        }
     }
     if size_opt {
         clang_args.append("-ffunction-sections");
         clang_args.append("-fdata-sections");
     }
-    clang_args.append(ll_file);
+    if (cfg.backend == "machine") {
+        clang_args.append(machine_file);
+    }
+    else { clang_args.append(ll_file); }
 
     let extra_idx: Int = 0;
     while (extra_idx < cfg.extra_files.length()) {
@@ -518,7 +750,9 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     if (cfg.is_asm_only) {
         clang_args.append("-S");
-        if (cfg.is_emit_llvm) { clang_args.append("-emit-llvm"); }
+        if (cfg.is_emit_llvm) {
+            clang_args.append("-emit-llvm");
+        }
         clang_args.append("-o");
         clang_args.append(cfg.output_file);
     }
@@ -531,11 +765,17 @@ func main(argc: Int, ptr argv: String) -> Int {
     else {
         if size_opt {
             clang_args.append("-Xlinker");
-            if (WhitelangTarget.get_target_os() == sys.Os.Windows) { clang_args.append("/opt:ref"); }
-            else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) { clang_args.append("-dead_strip"); }
+            if using_mingw_linker { clang_args.append("--gc-sections"); }
+            else if (WhitelangTarget.get_target_os() == sys.Os.Windows) { clang_args.append("/opt:ref"); }
+            else if (WhitelangTarget.get_target_os() == sys.Os.MacOS) {
+                clang_args.append("-dead_strip");
+            }
             else { clang_args.append("--gc-sections"); }
 
-            if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
+            if using_mingw_linker {
+                clang_args.append("-Xlinker");
+                clang_args.append("--icf=all");
+            } else if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
                 clang_args.append("-Xlinker");
                 clang_args.append("/opt:icf");
             }
@@ -549,16 +789,27 @@ func main(argc: Int, ptr argv: String) -> Int {
             }
             if (WhitelangTarget.get_target_os() == sys.Os.Windows && using_portable_clang) {
                 clang_args.append("-Xlinker");
-                if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
+                if using_mingw_linker {
+                    clang_args.append("--out-implib=" + import_lib);
+                }
+                else if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
                 else { clang_args.append("--out-implib=" + import_lib); }
             }
-            if (WhitelangTarget.get_target_os() != sys.Os.Windows) { clang_args.append("-fPIC"); }
+            if (WhitelangTarget.get_target_os() != sys.Os.Windows) {
+                clang_args.append("-fPIC");
+            }
         }
 
         if (WhitelangTarget.get_target_os() == sys.Os.Windows) {
             clang_args.append("-nostdlib");
             clang_args.append("-Xlinker");
-            if (cfg.is_shared) {
+            if (using_mingw_linker && cfg.is_shared) {
+                clang_args.append("--entry=DllMainCRTStartup");
+            } else if (using_mingw_linker) {
+                clang_args.append("--entry=mainCRTStartup");
+                clang_args.append("-Xlinker");
+                clang_args.append("--subsystem=console");
+            } else if (cfg.is_shared) {
                 clang_args.append("/entry:DllMainCRTStartup");
             } else {
                 clang_args.append("/entry:mainCRTStartup");
@@ -613,7 +864,9 @@ func main(argc: Int, ptr argv: String) -> Int {
 
     if (ret == 0 && import_lib.length() > 0 && !using_portable_clang && !WhitelangUtils.file_exists(import_lib)) {
         clang_args.append("-Xlinker");
-        if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) { clang_args.append("/implib:" + import_lib); }
+        if (WhitelangTarget.get_target_abi() == sys.Abi.Msvc) {
+            clang_args.append("/implib:" + import_lib);
+        }
         else { clang_args.append("--out-implib=" + import_lib); }
         ret = process.run(clang_cmd, clang_args)?;
         catch(err) {
@@ -622,13 +875,26 @@ func main(argc: Int, ptr argv: String) -> Int {
         }
     }
 
-    if (!cfg.keep_temps && cfg.output_file != ll_file) {
+    if (cfg.backend != "machine" && !cfg.keep_temps && cfg.output_file != ll_file) {
         if (cfg.verbose) { print("Cleaning up: " + ll_file); }
         file.remove(ll_file)?;
         catch(err) {
-            if (cfg.verbose) { print("Warning: Could not remove temporary file " + ll_file + "."); }
+            if (cfg.verbose) {
+                print("Warning: Could not remove temporary file " + ll_file + ".");
+            }
         }
         WhitelangExceptions.CLEAN_TMP_LL = "";
+    }
+    if (cfg.backend == "machine" && !cfg.keep_temps && cfg.output_file != machine_file && WhitelangUtils.file_exists(machine_file)) {
+        if (cfg.verbose) {
+            print("Cleaning up: " + machine_file);
+        }
+        file.remove(machine_file)?;
+        catch(err) {
+            if (cfg.verbose) {
+                print("Warning: Could not remove temporary file " + machine_file + ".");
+            }
+        }
     }
 
     if (ret != 0) {

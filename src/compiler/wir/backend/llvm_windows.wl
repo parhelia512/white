@@ -1,7 +1,8 @@
-// compiler/wir/backend/llvm_windows.wl
+// src/compiler/wir/backend/llvm_windows.wl
 
 import "strings"
 import * from "../model.wl"
+
 
 func llvm_windows_target(program: WirModule) -> Bool {
     return program.target == "i686-pc-windows-msvc" || program.target == "x86_64-pc-windows-msvc";
@@ -34,7 +35,8 @@ func llvm_windows_emits_memop(program: WirModule, name: String) -> Bool {
 }
 
 func llvm_write_windows_memcpy(output: strings.Builder, size_type: String) -> Void? {
-    // volatile byte accesses keep LLVM from recognizing the fallback as another memcpy
+// volatile byte accesses keep LLVM from recognizing the fallback as another memcpy
+
     output.write("define ptr @memcpy(ptr %dest, ptr %src, " + size_type + " %count) noinline optnone {\n")?;
     output.write("entry:\n  br label %copy.cond\n\n")?;
     output.write("copy.cond:\n")?;
@@ -49,6 +51,7 @@ func llvm_write_windows_memcpy(output: strings.Builder, size_type: String) -> Vo
     output.write("  %next = add " + size_type + " %index, 1\n")?;
     output.write("  br label %copy.cond\n\n")?;
     output.write("copy.end:\n  ret ptr %dest\n}\n\n")?;
+
     return;
 }
 
@@ -90,6 +93,7 @@ func llvm_write_windows_memmove(output: strings.Builder, size_type: String) -> V
     output.write("  store volatile i8 %backward.byte, ptr %backward.dest\n")?;
     output.write("  br label %backward.cond\n\n")?;
     output.write("move.end:\n  ret ptr %dest\n}\n\n")?;
+
     return;
 }
 
@@ -106,19 +110,26 @@ func llvm_write_windows_memset(output: strings.Builder, size_type: String) -> Vo
     output.write("  %next = add " + size_type + " %index, 1\n")?;
     output.write("  br label %set.cond\n\n")?;
     output.write("set.end:\n  ret ptr %dest\n}\n\n")?;
+
     return;
 }
 
 func llvm_write_windows_memops(output: strings.Builder, program: WirModule) -> Void? {
     let size_type: String = "i" + program.pointer_bits;
-    if (llvm_windows_emits_memop(program, "memcpy")) { llvm_write_windows_memcpy(output, size_type)?; }
-    if (llvm_windows_emits_memop(program, "memmove")) { llvm_write_windows_memmove(output, size_type)?; }
-    if (llvm_windows_emits_memop(program, "memset")) { llvm_write_windows_memset(output, size_type)?; }
+    if (llvm_windows_emits_memop(program, "memcpy")) {
+        llvm_write_windows_memcpy(output, size_type)?;
+    }
+    if (llvm_windows_emits_memop(program, "memmove")) {
+        llvm_write_windows_memmove(output, size_type)?;
+    }
+    if (llvm_windows_emits_memop(program, "memset")) {
+        llvm_write_windows_memset(output, size_type)?;
+    }
     return;
 }
 
 func llvm_write_windows_x86_udivrem(output: strings.Builder) -> Void? {
-    /*
+/*
     use restoring division for the full-width case:
 
         quotient = 0
@@ -131,6 +142,7 @@ func llvm_write_windows_x86_udivrem(output: strings.Builder) -> Void? {
 
     the loop avoids introducing the same 64-bit helper call it implements.
     */
+
     output.write("define internal void @__wl_udivrem64(i64 %dividend, i64 %divisor, ptr %quotient.out, ptr %remainder.out) noinline {\n")?;
     output.write("entry:\n")?;
     output.write("  %zero = icmp eq i64 %divisor, 0\n")?;
@@ -183,6 +195,7 @@ func llvm_write_windows_x86_udivrem(output: strings.Builder) -> Void? {
     output.write("  store i64 %quotient, ptr %quotient.out\n")?;
     output.write("  store i64 %remainder, ptr %remainder.out\n")?;
     output.write("  ret void\n}\n\n")?;
+
     return;
 }
 
@@ -195,6 +208,7 @@ func llvm_write_windows_x86_unsigned_division(output: strings.Builder) -> Void? 
     output.write("entry:\n  %quotient = alloca i64\n  %remainder = alloca i64\n")?;
     output.write("  call void @__wl_udivrem64(i64 %dividend, i64 %divisor, ptr %quotient, ptr %remainder)\n")?;
     output.write("  %result = load i64, ptr %remainder\n  ret i64 %result\n}\n\n")?;
+
     return;
 }
 
@@ -228,6 +242,7 @@ func llvm_write_windows_x86_signed_division(output: strings.Builder) -> Void? {
     output.write("  %negative.result = sub i64 0, %magnitude\n")?;
     output.write("  %result = select i1 %dividend.negative, i64 %negative.result, i64 %magnitude\n")?;
     output.write("  ret i64 %result\n}\n\n")?;
+
     return;
 }
 
@@ -262,6 +277,7 @@ func llvm_write_windows_x86_probe(output: strings.Builder) -> Void? {
     output.write("module asm \"movl 4(%eax), %eax\"\n")?;
     output.write("module asm \"pushl %eax\"\n")?;
     output.write("module asm \"retl\"\n\n")?;
+
     return;
 }
 
@@ -289,11 +305,14 @@ func llvm_write_windows_x64_probe(output: strings.Builder) -> Void? {
     output.write("module asm \"popq %rax\"\n")?;
     output.write("module asm \"popq %rcx\"\n")?;
     output.write("module asm \"retq\"\n\n")?;
+
     return;
 }
 
 func llvm_write_windows_support(output: strings.Builder, program: WirModule) -> Void? {
-    if (!llvm_windows_needs_support(program)) { return; }
+    if (!llvm_windows_needs_support(program)) {
+        return;
+    }
     llvm_write_windows_memops(output, program)?;
     if (program.target == "i686-pc-windows-msvc") {
         llvm_write_windows_x86_division(output)?;

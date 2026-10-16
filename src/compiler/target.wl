@@ -1,5 +1,6 @@
-// compiler/target.wl
+// src/compiler/target.wl
 import "sys"
+
 
 let __target_triple: String = "";
 let __target_os: Int = -1;
@@ -10,16 +11,28 @@ let __target_pointer_bits: Int = 0;
 
 func native_target_triple() -> String {
     if (sys.OS == sys.Os.Windows) {
-        if (sys.ARCH == sys.Arch.X86) { return "i686-pc-windows-msvc"; }
+        if (sys.ARCH == sys.Arch.X86) {
+            return "i686-pc-windows-msvc";
+        }
         if (sys.ARCH == sys.Arch.X86_64) { return "x86_64-pc-windows-msvc"; }
     } else if (sys.OS == sys.Os.Linux) {
-        if (sys.ARCH == sys.Arch.X86) { return "i686-unknown-linux-gnu"; }
-        if (sys.ARCH == sys.Arch.X86_64) { return "x86_64-unknown-linux-gnu"; }
-        if (sys.ARCH == sys.Arch.Arm) { return "armv7-unknown-linux-gnueabihf"; }
+        if (sys.ARCH == sys.Arch.X86) {
+            return "i686-unknown-linux-gnu";
+        }
+        if (sys.ARCH == sys.Arch.X86_64) {
+            return "x86_64-unknown-linux-gnu";
+        }
+        if (sys.ARCH == sys.Arch.Arm) {
+            return "armv7-unknown-linux-gnueabihf";
+        }
         if (sys.ARCH == sys.Arch.AArch64) { return "aarch64-unknown-linux-gnu"; }
     } else if (sys.OS == sys.Os.MacOS) {
-        if (sys.ARCH == sys.Arch.X86_64) { return "x86_64-apple-darwin"; }
-        if (sys.ARCH == sys.Arch.AArch64) { return "arm64-apple-darwin"; }
+        if (sys.ARCH == sys.Arch.X86_64) {
+            return "x86_64-apple-darwin";
+        }
+        if (sys.ARCH == sys.Arch.AArch64) {
+            return "arm64-apple-darwin";
+        }
     }
     return "";
 }
@@ -40,14 +53,38 @@ func select_target(triple: String) -> Bool {
         __set_target(native, sys.OS, sys.ARCH, sys.ABI, sys.BINARY_FORMAT, sys.POINTER_BITS);
         return true;
     }
-    if (triple == "i686-pc-windows-msvc") { __set_target(triple, sys.Os.Windows, sys.Arch.X86, sys.Abi.Msvc, sys.BinaryFormat.Coff, 32); return true; }
-    if (triple == "x86_64-pc-windows-msvc") { __set_target(triple, sys.Os.Windows, sys.Arch.X86_64, sys.Abi.Msvc, sys.BinaryFormat.Coff, 64); return true; }
-    if (triple == "i686-unknown-linux-gnu") { __set_target(triple, sys.Os.Linux, sys.Arch.X86, sys.Abi.Gnu, sys.BinaryFormat.Elf, 32); return true; }
-    if (triple == "x86_64-unknown-linux-gnu") { __set_target(triple, sys.Os.Linux, sys.Arch.X86_64, sys.Abi.Gnu, sys.BinaryFormat.Elf, 64); return true; }
-    if (triple == "armv7-unknown-linux-gnueabihf") { __set_target(triple, sys.Os.Linux, sys.Arch.Arm, sys.Abi.Gnu, sys.BinaryFormat.Elf, 32); return true; }
-    if (triple == "aarch64-unknown-linux-gnu") { __set_target(triple, sys.Os.Linux, sys.Arch.AArch64, sys.Abi.Gnu, sys.BinaryFormat.Elf, 64); return true; }
-    if (triple == "x86_64-apple-darwin") { __set_target(triple, sys.Os.MacOS, sys.Arch.X86_64, sys.Abi.None, sys.BinaryFormat.MachO, 64); return true; }
-    if (triple == "arm64-apple-darwin" || triple == "aarch64-apple-darwin") { __set_target("arm64-apple-darwin", sys.Os.MacOS, sys.Arch.AArch64, sys.Abi.None, sys.BinaryFormat.MachO, 64); return true; }
+    if (triple == "i686-pc-windows-msvc") {
+        __set_target(triple, sys.Os.Windows, sys.Arch.X86, sys.Abi.Msvc, sys.BinaryFormat.Coff, 32);
+        return true;
+    }
+    if (triple == "x86_64-pc-windows-msvc") {
+        __set_target(triple, sys.Os.Windows, sys.Arch.X86_64, sys.Abi.Msvc, sys.BinaryFormat.Coff, 64);
+        return true;
+    }
+    if (triple == "i686-unknown-linux-gnu") {
+        __set_target(triple, sys.Os.Linux, sys.Arch.X86, sys.Abi.Gnu, sys.BinaryFormat.Elf, 32);
+        return true;
+    }
+    if (triple == "x86_64-unknown-linux-gnu") {
+        __set_target(triple, sys.Os.Linux, sys.Arch.X86_64, sys.Abi.Gnu, sys.BinaryFormat.Elf, 64);
+        return true;
+    }
+    if (triple == "armv7-unknown-linux-gnueabihf") {
+        __set_target(triple, sys.Os.Linux, sys.Arch.Arm, sys.Abi.Gnu, sys.BinaryFormat.Elf, 32);
+        return true;
+    }
+    if (triple == "aarch64-unknown-linux-gnu") {
+        __set_target(triple, sys.Os.Linux, sys.Arch.AArch64, sys.Abi.Gnu, sys.BinaryFormat.Elf, 64);
+        return true;
+    }
+    if (triple == "x86_64-apple-darwin") {
+        __set_target(triple, sys.Os.MacOS, sys.Arch.X86_64, sys.Abi.None, sys.BinaryFormat.MachO, 64);
+        return true;
+    }
+    if (triple == "arm64-apple-darwin" || triple == "aarch64-apple-darwin") {
+        __set_target("arm64-apple-darwin", sys.Os.MacOS, sys.Arch.AArch64, sys.Abi.None, sys.BinaryFormat.MachO, 64);
+        return true;
+    }
     return false;
 }
 

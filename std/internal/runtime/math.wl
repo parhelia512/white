@@ -31,7 +31,7 @@ func __float_high(value: Float) -> Float {
 }
 
 func __float_integer_kind(value: Float) -> Int {
-    // 0 is fractional, 1 is even, and 2 is odd
+// 0 is fractional, 1 is even, and 2 is odd
     let bits: UInt64 = __float_bits(__float_abs(value));
     let exponent: Int = Int((bits >> UInt64(52)) & UInt64(2047));
     if (exponent < 1023) { return 0; }
@@ -46,7 +46,7 @@ func __float_integer_kind(value: Float) -> Int {
 
 @CompilerLink("float_mod")
 func float_mod(left: Float, right: Float) -> Float {
-    // reduce the significands directly so code generation never needs a libc fmod
+// reduce the significands directly so code generation never needs a libc fmod
     let left_bits: UInt64 = __float_bits(left);
     let right_bits: UInt64 = __float_bits(right);
     let sign: UInt64 = left_bits & __FLOAT_SIGN;
@@ -54,7 +54,9 @@ func float_mod(left: Float, right: Float) -> Float {
     let right_abs: UInt64 = right_bits & __FLOAT_ABS;
     if (right_abs == UInt64(0) || left_abs >= __FLOAT_EXP || right_abs > __FLOAT_EXP) { return __float_from_bits(__FLOAT_NAN); }
     if (left_abs < right_abs) { return left; }
-    if (left_abs == right_abs) { return __float_from_bits(sign); }
+    if (left_abs == right_abs) {
+        return __float_from_bits(sign);
+    }
 
     let left_exp_bits: Int = Int((left_abs >> UInt64(52)) & UInt64(2047));
     let right_exp_bits: Int = Int((right_abs >> UInt64(52)) & UInt64(2047));
@@ -62,10 +64,26 @@ func float_mod(left: Float, right: Float) -> Float {
     let right_exp: Int = -1022;
     let left_mantissa: UInt64 = left_abs & __FLOAT_FRAC;
     let right_mantissa: UInt64 = right_abs & __FLOAT_FRAC;
-    if (left_exp_bits != 0) { left_exp = left_exp_bits - 1023; left_mantissa |= UInt64(1) << UInt64(52); }
-    else { while (left_mantissa < (UInt64(1) << UInt64(52))) { left_mantissa <<= UInt64(1); left_exp -= 1; } }
-    if (right_exp_bits != 0) { right_exp = right_exp_bits - 1023; right_mantissa |= UInt64(1) << UInt64(52); }
-    else { while (right_mantissa < (UInt64(1) << UInt64(52))) { right_mantissa <<= UInt64(1); right_exp -= 1; } }
+    if (left_exp_bits != 0) {
+        left_exp = left_exp_bits - 1023;
+        left_mantissa |= UInt64(1) << UInt64(52);
+    }
+    else {
+        while (left_mantissa < (UInt64(1) << UInt64(52))) {
+            left_mantissa <<= UInt64(1);
+            left_exp -= 1;
+        }
+    }
+    if (right_exp_bits != 0) {
+        right_exp = right_exp_bits - 1023;
+        right_mantissa |= UInt64(1) << UInt64(52);
+    }
+    else {
+        while (right_mantissa < (UInt64(1) << UInt64(52))) {
+            right_mantissa <<= UInt64(1);
+            right_exp -= 1;
+        }
+    }
 
     while (left_exp > right_exp) {
         if (left_mantissa >= right_mantissa) { left_mantissa -= right_mantissa; }
@@ -73,8 +91,13 @@ func float_mod(left: Float, right: Float) -> Float {
         left_exp -= 1;
     }
     if (left_mantissa >= right_mantissa) { left_mantissa -= right_mantissa; }
-    if (left_mantissa == UInt64(0)) { return __float_from_bits(sign); }
-    while (left_mantissa < (UInt64(1) << UInt64(52))) { left_mantissa <<= UInt64(1); left_exp -= 1; }
+    if (left_mantissa == UInt64(0)) {
+        return __float_from_bits(sign);
+    }
+    while (left_mantissa < (UInt64(1) << UInt64(52))) {
+        left_mantissa <<= UInt64(1);
+        left_exp -= 1;
+    }
 
     let result_bits: UInt64 = sign;
     if (left_exp >= -1022) {
@@ -128,8 +151,12 @@ func __float_exp_product(exponent_value: Float, logarithm_high: Float, logarithm
     let product_high: Float = exponent_high * logarithm_high;
     let product_low: Float = (exponent_value - exponent_high) * logarithm_high + exponent_value * logarithm_low;
     let product: Float = product_high + product_low;
-    if (product > 709.782712893384) { return __float_from_bits(__FLOAT_INF); }
-    if (product < -745.1332191019411) { return 0.0; }
+    if (product > 709.782712893384) {
+        return __float_from_bits(__FLOAT_INF);
+    }
+    if (product < -745.1332191019411) {
+        return 0.0;
+    }
 
     let binary_exponent: Long = Long(product * 1.4426950408889634);
     let reduced_probe: Float = product - Float(binary_exponent) * 0.6931471805599453;
@@ -170,8 +197,12 @@ func float_pow(base: Float, exponent: Float) -> Float {
     let base_abs_bits: UInt64 = base_bits & __FLOAT_ABS;
     let exponent_abs_bits: UInt64 = exponent_bits & __FLOAT_ABS;
 
-    if (exponent_abs_bits == UInt64(0)) { return 1.0; }
-    if (base_bits == __FLOAT_ONE) { return 1.0; }
+    if (exponent_abs_bits == UInt64(0)) {
+        return 1.0;
+    }
+    if (base_bits == __FLOAT_ONE) {
+        return 1.0;
+    }
     if (exponent_abs_bits > __FLOAT_EXP) { return exponent; }
     if (base_abs_bits > __FLOAT_EXP) { return base; }
 
@@ -179,8 +210,12 @@ func float_pow(base: Float, exponent: Float) -> Float {
     let exponent_negative: Bool = (exponent_bits & __FLOAT_SIGN) != UInt64(0);
     let base_negative: Bool = (base_bits & __FLOAT_SIGN) != UInt64(0);
     if (exponent_abs_bits == __FLOAT_EXP) {
-        if (base_abs == 1.0) { return 1.0; }
-        if ((base_abs > 1.0) != exponent_negative) { return __float_from_bits(__FLOAT_INF); }
+        if (base_abs == 1.0) {
+            return 1.0;
+        }
+        if ((base_abs > 1.0) != exponent_negative) {
+            return __float_from_bits(__FLOAT_INF);
+        }
         return 0.0;
     }
 
@@ -188,15 +223,23 @@ func float_pow(base: Float, exponent: Float) -> Float {
     let negative_result: Bool = base_negative && integer_kind == 2;
     if (base_abs_bits == __FLOAT_EXP || base_abs_bits == UInt64(0)) {
         let result: Float = 0.0;
-        if ((base_abs_bits == __FLOAT_EXP) != exponent_negative) { result = __float_from_bits(__FLOAT_INF); }
-        if negative_result { return -result; }
+        if ((base_abs_bits == __FLOAT_EXP) != exponent_negative) {
+            result = __float_from_bits(__FLOAT_INF);
+        }
+        if negative_result {
+            return -result;
+        }
         return result;
     }
-    if (base_negative && integer_kind == 0) { return __float_from_bits(__FLOAT_NAN); }
+    if (base_negative && integer_kind == 0) {
+        return __float_from_bits(__FLOAT_NAN);
+    }
 
     let logarithm_low: Float = 0.0;
     let logarithm_high: Float = __float_log(base_abs, ref logarithm_low);
     let result: Float = __float_exp_product(exponent, logarithm_high, logarithm_low);
-    if negative_result { return -result; }
+    if negative_result {
+        return -result;
+    }
     return result;
 }

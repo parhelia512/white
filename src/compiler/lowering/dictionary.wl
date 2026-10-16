@@ -1,21 +1,30 @@
-// compiler/lowering/dictionary.wl
+// src/compiler/lowering/dictionary.wl
 import Dict from "dict"
 import * from "../../frontend/ast.wl"
 import * from "../context.wl"
 import * from "../../frontend/diagnostics.wl"
 
+
 func is_dict_key_type(ref c: Compiler, type_id: Int) -> Bool {
-    if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) { return true; }
-    if (is_primitive_type(type_id)) { return type_id != TYPE_ANY_ERROR; }
+    if (type_id == TYPE_NULL || type_id == TYPE_NULLPTR || type_id == TYPE_ANYPTR || type_id == TYPE_STRING) {
+        return true;
+    }
+    if (is_primitive_type(type_id)) {
+        return type_id != TYPE_ANY_ERROR;
+    }
     if (is_pointer_type(ref c, type_id)) { return true; }
 
     let info: StructInfo = c.struct_id_map.lookup("" + type_id);
     if (has_struct(info)) {
         if (info.is_enum || info.is_interface) { return true; }
-        if (info.is_class) { return info.name != "dict.Dict" && info.name != "Dict" && !info.name.starts_with("dict.Dict$") && !info.name.starts_with("Dict$"); }
+        if (info.is_class) {
+            return info.name != "dict.Dict" && info.name != "Dict" && !info.name.starts_with("dict.Dict$") && !info.name.starts_with("Dict$");
+        }
         return false;
     }
-    if (has_symbol(c.func_ret_map.lookup("" + type_id)) || has_symbol(c.method_ret_map.lookup("" + type_id))) { return true; }
+    if (has_symbol(c.func_ret_map.lookup("" + type_id)) || has_symbol(c.method_ret_map.lookup("" + type_id))) {
+        return true;
+    }
     return false;
 }
 
@@ -149,6 +158,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
     c.output_file.write("  %high = load i64, i64* %high.addr\n");
     c.output_file.write("  switch i64 %tag, label %invalid [\n");
     c.output_file.write("    i64 0, label %bits\n");
+
     let key_cases: String = "";
     let class_hash_blocks: String = "";
 
@@ -162,7 +172,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
             let label: String = "%bits";
             if (type_id == TYPE_STRING) { label = "%string"; }
             if (type_id == TYPE_FLOAT || type_id == TYPE_FLOAT32) { label = "%float"; }
-    
+
             let class_info: StructInfo = c.struct_id_map.lookup("" + type_id);
             if (has_struct(class_info) && class_info.is_class && has_struct(hash_interface) && implements_interface(ref c, type_id, hash_interface.type_id)) {
                 label = "%class.hash." + type_id;
@@ -177,6 +187,7 @@ func emit_dict_key_helpers(ref c: Compiler) -> Void {
         }
         type_id++;
     }
+
     c.output_file.write(key_cases);
     c.output_file.write("  ]\n");
     c.output_file.write("bits:\n");
@@ -312,9 +323,7 @@ func class_method_index(info: StructInfo, name: String) -> Int {
     let index: Int = 0;
     while (has_struct(info) && info.vtable is !null && index < info.vtable.length()) {
         let entry: FuncInfo = info.vtable[index];
-        if (entry.base_name == name) {
-            return index;
-        }
+        if (entry.base_name == name) { return index; }
         index++;
     }
     return -1;
@@ -329,6 +338,7 @@ func emit_class_hash_helpers(ref c: Compiler, info: StructInfo, type_id: Int, ll
     }
 
     let table_type: String = class_vtable_type(ref c, info);
+
     c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\n");
     c.output_file.write("entry:\n");
     c.output_file.write("  %is.null = icmp eq " + llvm_type + " %key, null\n");
@@ -420,15 +430,16 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
                 emit_class_hash_helpers(ref c, key_info, type_id, llvm_type, hash_name, equal_name);
             } else {
                 c.output_file.write("define internal i32 " + hash_name + "(" + llvm_type + " %key) {\nentry:\n");
-                let bits: String = "%bits";
-                if (is_pointer_type(ref c, repr_type) || repr_type == TYPE_ANYPTR || 
-                    has_symbol(c.func_ret_map.lookup("" + repr_type)) || 
-                    has_symbol(c.method_ret_map.lookup("" + repr_type))) {
 
+                let bits: String = "%bits";
+                if (is_pointer_type(ref c, repr_type) || repr_type == TYPE_ANYPTR ||
+                    has_symbol(c.func_ret_map.lookup("" + repr_type)) ||
+                    has_symbol(c.method_ret_map.lookup("" + repr_type))) {
                     c.output_file.write("  " + bits + " = ptrtoint " + llvm_type + " %key to i64\n");
                 }
                 else if (repr_type == TYPE_INT128 || repr_type == TYPE_UINT128) {
                     c.output_file.write("  %low = trunc i128 %key to i64\n  %shift = lshr i128 %key, 64\n  %high = trunc i128 %shift to i64\n  %result = call i32 @__wl_dict_hash_bits(i64 " + type_fingerprint(ref c, type_id) + ", i64 %low, i64 %high)\n  ret i32 %result\n}\n\n");
+
                     bits = "";
                 }
                 else if (repr_type == TYPE_FLOAT) {
@@ -458,12 +469,15 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
                 if (bits.length() > 0) {
                     c.output_file.write("}\n\n");
                 }
+
                 c.output_file.write("define internal i1 " + equal_name + "(" + llvm_type + " %left, " + llvm_type + " %right) {\nentry:\n");
+
                 if (repr_type == TYPE_FLOAT || repr_type == TYPE_FLOAT32) {
                     c.output_file.write("  %result = fcmp oeq " + llvm_type + " %left, %right\n");
                 } else {
                     c.output_file.write("  %result = icmp eq " + llvm_type + " %left, %right\n");
                 }
+
                 c.output_file.write("  ret i1 %result\n}\n\n");
             }
         }
@@ -471,11 +485,9 @@ func emit_hash_helpers(ref c: Compiler) -> Void {
     }
 }
 
-
 func class_vtable_type(ref c: Compiler, info: StructInfo) -> String {
     if (has_template(c.generic_instance_templates.lookup("" + info.type_id))) {
         return generic_llvm_name("%vtable_type.__generic.", info.type_id);
     }
     return "%vtable_type." + info.name;
 }
-

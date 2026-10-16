@@ -1,21 +1,34 @@
-// compiler/wir/lowering/declarations.wl
+// src/compiler/wir/lowering/declarations.wl
 import * from "../model.wl"
 import * from "../builder.wl"
 import * from "types.wl"
 import * from "../../context.wl"
 import PARAM_VALUE, PARAM_REF from "../../../frontend/ast.wl"
 
+
 func wir_function_abi(ref types: WirTypeMap, info: FuncInfo) -> WirABI {
-    if (info.abi_name is null || info.abi_name.length() == 0) { return WirABI.White; }
+    if (info.abi_name is null || info.abi_name.length() == 0) {
+        // ExportLib is a native boundary, it cannot use an implementation ABI
+        // just because scalar arguments happen to use the same registers.
+        if ((info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+            return WirABI.C;
+        }
+
+        return WirABI.White;
+    }
     if (info.abi_name == "C" || info.abi_name == "c") { return WirABI.C; }
-    if (info.abi_name == "system" || info.abi_name == "System" || info.abi_name == "SYSTEM") { return WirABI.System; }
+    if (info.abi_name == "system" || info.abi_name == "System" || info.abi_name == "SYSTEM") {
+        return WirABI.System;
+    }
     types.errors.append("Unknown ABI '" + info.abi_name + "' on function '" + info.name + "'");
     return WirABI.White;
 }
 
 func wir_function_linkage(info: FuncInfo, abi: WirABI) -> WirLinkage {
+    if (info.base_name == "main" || (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
+        return WirLinkage.Exported;
+    }
     if (abi != WirABI.White) { return WirLinkage.External; }
-    if (info.base_name == "main" || (info.ann_flags & FLAG_ANN_EXPORT) != 0) { return WirLinkage.Exported; }
     return WirLinkage.Internal;
 }
 
@@ -23,7 +36,9 @@ func wir_lower_parameter_type(ref types: WirTypeMap, ref source: Compiler, ref p
     let type_id: WirTypeID = wir_lower_source_type(ref types, ref source, ref program, parameter.type);
     if (type_id == NO_WIR_TYPE) { return NO_WIR_TYPE; }
     if (parameter.pass_mode == PARAM_VALUE) { return type_id; }
-    if (parameter.pass_mode == PARAM_REF) { return wir_pointer_type(ref program, type_id); }
+    if (parameter.pass_mode == PARAM_REF) {
+        return wir_pointer_type(ref program, type_id);
+    }
     types.errors.append("Unknown parameter passing mode " + parameter.pass_mode);
     return NO_WIR_TYPE;
 }
@@ -52,7 +67,9 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
         let type_id: WirTypeID = wir_lower_parameter_type(ref types, ref source, ref program, parameter);
         if (type_id == NO_WIR_TYPE) { return NO_WIR_FUNC; }
         let name: String = "arg" + i;
-        if (info.arg_names is !null && i < info.arg_names.length() && info.arg_names[i].length() != 0) { name = info.arg_names[i]; }
+        if (info.arg_names is !null && i < info.arg_names.length() && info.arg_names[i].length() != 0) {
+            name = info.arg_names[i];
+        }
         parameters.append(wir_param(name, type_id));
         i++;
     }
@@ -60,6 +77,20 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
     let abi: WirABI = wir_function_abi(ref types, info);
     let linkage: WirLinkage = wir_function_linkage(info, abi);
     if (linkage == WirLinkage.External && abi == WirABI.White) { return NO_WIR_FUNC; }
+    let parameter_types: Vector(WirTypeID) = [];
+    i = 0;
+    while (i < parameters.length()) {
+        parameter_types.append(parameters[i].type_id);
+        i++;
+    }
+    let signature: WirTypeID = wir_function_type(ref program, parameter_types, result, info.is_varargs, abi);
+    let existing_id: WirFuncID = program.arena.function_names.lookup(info.name);
+    if (existing_id != NO_WIR_FUNC && linkage == WirLinkage.External) {
+        let existing: WirFunction = program.arena.functions[wir_id_index(UInt32(existing_id))];
+        if (existing.linkage == WirLinkage.External && existing.type_id == signature && existing.abi == abi) { return existing_id; }
+        types.errors.append("Conflicting extern declaration for symbol '" + info.name + "'.");
+        return NO_WIR_FUNC;
+    }
     let function_id: WirFuncID = wir_add_function(ref program, info.name, parameters, result, info.is_varargs, linkage, abi);
     if (source.is_shared && (info.ann_flags & FLAG_ANN_EXPORT) != 0) {
         program.arena.functions[wir_id_index(UInt32(function_id))].export_symbol = true;
@@ -68,17 +99,16 @@ func wir_lower_function_decl(ref types: WirTypeMap, ref source: Compiler, ref pr
 }
 
 func wir_find_function(program: WirModule, name: String) -> WirFuncID {
-    let i: Int = 0;
-    while (i < program.arena.functions.length()) {
-        if (program.arena.functions[i].name == name) { return WirFuncID(UInt32(i + 1)); }
-        i++;
-    }
-    return NO_WIR_FUNC;
+    return program.arena.function_names.lookup(name);
 }
 
 func wir_compiler_link_function(ref source: Compiler, name: String) -> FuncInfo {
-    if (source.compiler_link is null) { return FuncInfo(); }
+    if (source.compiler_link is null) {
+        return FuncInfo();
+    }
     let key: String = source.compiler_link.lookup(name);
-    if (key is null || key.length() == 0) { return FuncInfo(); }
+    if (key is null || key.length() == 0) {
+        return FuncInfo();
+    }
     return source.func_table.lookup(key);
 }

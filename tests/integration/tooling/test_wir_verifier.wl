@@ -117,6 +117,17 @@ func rejects_target_layout_mismatch() -> Bool {
     return verifier_has(errors, "module has no data layout for its target");
 }
 
+func rejects_unsigned_abs() -> Bool {
+    let program = new_wir_module("x86_64-pc-windows-msvc", 64);
+    let u32 = wir_unsigned_int_type(ref program, 32);
+    let function = wir_add_function(ref program, "unsigned_abs", [], u32, false, WirLinkage.Internal, WirABI.White);
+    let entry = wir_add_block(ref program, function, "entry", []);
+    let value = wir_const_int(ref program, u32, UInt128(1U));
+    let result = wir_append(ref program, entry, WirOpcode.Abs, u32, [value], [], no_wir_location());
+    wir_return(ref program, entry, result, no_wir_location());
+    return verifier_has(verify_wir(program), "integer absolute value requires a signed integer type");
+}
+
 func main() -> Int {
     if (!rejects_recursive_layout()) { print("FAIL: recursive WIR layout was accepted"); return 1; }
     if (!rejects_late_alloca()) { print("FAIL: late WIR stack allocation was accepted"); return 1; }
@@ -127,6 +138,7 @@ func main() -> Int {
     if (!rejects_non_symbol_address()) { print("FAIL: non-symbol relocation target was accepted"); return 1; }
     if (!rejects_unsized_zero()) { print("FAIL: zero initializer accepted an unsized type"); return 1; }
     if (!rejects_target_layout_mismatch()) { print("FAIL: mismatched target layout was accepted"); return 1; }
+    if (!rejects_unsigned_abs()) { print("FAIL: unsigned WIR abs was accepted"); return 1; }
     print("PASS: WIR verifier invariants");
     return 0;
 }

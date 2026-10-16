@@ -1,4 +1,4 @@
-// compiler/wir/lowering/globals.wl
+// src/compiler/wir/lowering/globals.wl
 import * from "../model.wl"
 import * from "../builder.wl"
 import * from "types.wl"
@@ -7,6 +7,7 @@ import * from "../../context.wl"
 import eval_const_bool, eval_const_float, eval_const_long, eval_const_wide from "../../constants.wl"
 import * from "../../../frontend/ast.wl"
 import * from "../../../frontend/arena.wl"
+
 
 struct WirSourceGlobal(
     name: String,
@@ -23,10 +24,12 @@ func has_wir_source_global(global: WirSourceGlobal) -> Bool {
 }
 
 func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, source_type: Int, name: String) -> Void {
-    if (!node.is_const || !has_node(node.value)) { return; }
+    if (!node.is_const || !has_node(node.value)) {
+        return;
+    }
     let value_node: NodeID = node.value;
     if (node_tag(value_node) == NODE_CALL) {
-        let call: CallNode = get_call_node(source.arena, value_node);
+        let call: CallNode = get_call_node(ref source.arena, value_node);
         let target: Int = wir_static_cast_target(ref source, call.callee);
         if (target != 0 && call.args is !null && call.args.length() == 1) {
             let argument: ArgNode = call.args[0];
@@ -40,31 +43,41 @@ func wir_record_numeric_constant(ref source: Compiler, node: VarDeclareNode, sou
     if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) {
         let value: Float = eval_const_float(ref source, value_node, node.pos);
         if (repr == TYPE_FLOAT32) { value = Float(Float32(value)); }
-        if (source.constant_nums is !null) { source.constant_nums.put(name, value); }
+        if (source.constant_nums is !null) {
+            source.constant_nums.put(name, value);
+        }
         return;
     }
     if (get_type_bitwidth(repr) == 128 && is_integer_type(repr)) {
-        if (source.constant_wide_integers is !null) { source.constant_wide_integers.put(name, eval_const_wide(ref source, value_node, node.pos, is_unsigned_integer(repr))); }
+        if (source.constant_wide_integers is !null) {
+            source.constant_wide_integers.put(name, eval_const_wide(ref source, value_node, node.pos, is_unsigned_integer(repr)));
+        }
         return;
     }
     if (is_integer_type(repr) || repr == TYPE_CHAR || repr == TYPE_BOOL) {
         let value: Long = 0L;
         if (repr == TYPE_BOOL) { value = Long(eval_const_bool(ref source, value_node, node.pos)); }
         else if (repr == TYPE_CHAR && node_tag(value_node) == NODE_CHAR) {
-            value = Long(string_to_int(get_char_node(source.arena, value_node).tok.value, node.pos));
+            value = Long(string_to_int(get_char_node(ref source.arena, value_node).tok.value, node.pos));
         }
         else { value = eval_const_long(ref source, value_node, node.pos); }
-        if (source.constant_integers is !null) { source.constant_integers.put(name, value); }
-        if (source.constant_nums is !null) { source.constant_nums.put(name, Float(value)); }
+        if (source.constant_integers is !null) {
+            source.constant_integers.put(name, value);
+        }
+        if (source.constant_nums is !null) {
+            source.constant_nums.put(name, Float(value));
+        }
     }
 }
 
 func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
-    if (source.global_symbol_table is null) { return no_wir_source_global(); }
+    if (source.global_symbol_table is null) {
+        return no_wir_source_global();
+    }
 
     let key: String = name;
     let info: SymbolInfo = SymbolInfo();
-    if (source.current_package_prefix.length() != 0) {
+    if (source.current_package_prefix is !null && source.current_package_prefix.length() != 0) {
         key = source.current_package_prefix + name;
         info = source.global_symbol_table.lookup(key);
     }
@@ -86,17 +99,23 @@ func wir_source_global(ref source: Compiler, name: String) -> WirSourceGlobal {
             info = source.global_symbol_table.lookup(key);
         }
     }
-    if (!has_symbol(info)) { return no_wir_source_global(); }
+    if (!has_symbol(info)) {
+        return no_wir_source_global();
+    }
 
     let wir_name: String = key;
-    if (info.reg is !null && info.reg.starts_with("@")) { wir_name = info.reg.slice(1, info.reg.length()); }
+    if (info.reg is !null && info.reg.starts_with("@")) {
+        wir_name = info.reg.slice(1, info.reg.length());
+    }
     return WirSourceGlobal(name=wir_name, source_type=info.type, is_const=info.is_const);
 }
 
 func wir_find_global(program: WirModule, name: String) -> WirGlobalID {
     let i: Int = 0;
     while (i < program.arena.globals.length()) {
-        if (program.arena.globals[i].name == name) { return WirGlobalID(UInt32(i + 1)); }
+        if (program.arena.globals[i].name == name) {
+            return WirGlobalID(UInt32(i + 1));
+        }
         i++;
     }
     return NO_WIR_GLOBAL;
@@ -108,10 +127,18 @@ func wir_global_initializer(ref types: WirTypeMap, ref source: Compiler, ref pro
     let repr: Int = get_repr_type(ref source, source_type);
 
     if (!has_node(node.value)) {
-        if (repr == TYPE_BOOL) { return wir_const_bool(ref program, false); }
-        if (is_integer_type(repr) || repr == TYPE_CHAR) { return wir_const_int(ref program, type_id, UInt128(0U)); }
-        if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) { return wir_const_float(ref program, type_id, 0.0); }
-        if (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR) { return wir_null(ref program, type_id); }
+        if (repr == TYPE_BOOL) {
+            return wir_const_bool(ref program, false);
+        }
+        if (is_integer_type(repr) || repr == TYPE_CHAR) {
+            return wir_const_int(ref program, type_id, UInt128(0U));
+        }
+        if (repr == TYPE_FLOAT || repr == TYPE_FLOAT32) {
+            return wir_const_float(ref program, type_id, 0.0);
+        }
+        if (is_pointer_type(ref source, source_type) || source_type == TYPE_ANYPTR) {
+            return wir_null(ref program, type_id);
+        }
         types.errors.append("Global '" + node.name_tok.value + "' needs an initializer that WIR can represent");
         return NO_WIR_VALUE;
     }

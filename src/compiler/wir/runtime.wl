@@ -1,4 +1,4 @@
-// compiler/wir/runtime.wl
+// src/compiler/wir/runtime.wl
 
 // these offsets describe the payload pointer used by retain and release
 const WIR_ARC_REFCOUNT_OFFSET: Int = -8;
