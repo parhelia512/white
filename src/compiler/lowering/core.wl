@@ -5382,6 +5382,16 @@ func compile_binop(ref c: Compiler, node: BinOpNode) -> CompileResult {
     if (op_type == TOK_LTE) { is_cmp = true; }
 
     if is_cmp {
+        if (left.type == right.type && (left.type == TYPE_ANYPTR || is_pointer_type(ref c, left.type)) &&
+            (op_type == TOK_EE || op_type == TOK_NE)) {
+            let op_code: String = "icmp eq";
+            if (op_type == TOK_NE) { op_code = "icmp ne"; }
+            let res_reg: String = next_reg(ref c);
+            c.output_file.write(c.indent + res_reg + " = " + op_code + " " + get_llvm_type_str(ref c, left.type) + " " + left.reg + ", " + right.reg + "\n");
+
+            return CompileResult(reg=res_reg, type=TYPE_BOOL);
+        }
+
         let is_enum_cmp: Bool = false;
         if (left.type >= 100 && left.type == right.type) {
             let s_info: StructInfo = c.struct_id_map.lookup("" + left.type);
