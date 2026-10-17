@@ -29,7 +29,7 @@ import * from "../initialization.wl"
 import * from "ffi.wl"
 import * from "printing.wl"
 import * from "../backend/windows.wl"
-import hoist_llvm_allocas from "../backend/llvm.wl"
+import hoist_llvm_allocas, llvm_target_data_layout, llvm_header_end from "../backend/llvm.wl"
 
 
 func compile_ast_pass(ref c: Compiler, p_mod: ParsedModule) -> Void {
@@ -7461,6 +7461,10 @@ func init_compiler_intrinsics(ref c: Compiler) -> Void {
 }
 
 func emit_llvm_prelude(ref c: Compiler) -> Void {
+    let layout: String = llvm_target_data_layout(get_target_triple());
+    if (layout.length() != 0) {
+        c.output_file.write("target datalayout = \"" + layout + "\"\n");
+    }
     c.output_file.write("target triple = \"" + get_target_triple() + "\"\n\n");
     c.output_file.write("declare void @llvm.trap()\n\n");
 
@@ -7561,9 +7565,7 @@ func compile_end(ref c: Compiler) -> Void {
             return;
         }
 
-        let line_end: Int = 0;
-        while (line_end < body.length() && body[line_end] != '\n') { line_end++; }
-        if (line_end < body.length()) { line_end++; }
+        let line_end: Int = llvm_header_end(body);
 
         rewrite.write(body.slice(0, line_end));
         rewrite.write(c.generic_type_defs);
